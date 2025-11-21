@@ -1,0 +1,7 @@
+# No pujar mai els secrets locals
+.streamlit/
+
+# No pujar fitxers de base de dades ni PDFs generats
+*.db
+pdfs/*
+!pdfs/.gitkeep
