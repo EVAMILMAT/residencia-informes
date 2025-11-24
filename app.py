@@ -69,9 +69,14 @@ ALUMNOS = [
     "Soy Tony Theunisse","Tiago del Po Vica","Tomeu Umbert Sureda","Toni Febrer Sintes",
     "Victor Adda Ferrer","Xabier Fenández Cebey","Xavier Capllonch Salas","Matias Acosta Suarez"
 ]
-def generar_alias(nombre_completo: str) -> str:
+
+# -----------------------
+# Alias d'esportistes (sense duplicats)
+# -----------------------
+
+def generar_alias_base(nombre_completo: str) -> str:
     """
-    Genera un alias tipo @nombreInicialApellido a partir del nombre completo.
+    Genera un alias base tipo @nombreInicialApellido a partir del nombre completo.
     Ejemplo: 'Aina Real Cerdá' -> '@ainaR'
     """
     partes = nombre_completo.split()
@@ -86,13 +91,52 @@ def generar_alias(nombre_completo: str) -> str:
     else:
         return f"@{nombre}"
 
-# Diccionario global de alias por deportista
-ALIAS_DEPORTISTAS = {
-    alumno: generar_alias(alumno)
-    for alumno in ALUMNOS
-}
 
+def generar_alias_resuelto(nombre_completo: str, existentes: set) -> str:
+    """
+    Genera un alias evitando duplicados.
+    - Primero usa @nombre + inicial 1er apellido.
+    - Si ya existe y hay 2º apellido, usa @nombre + inicial 1er + inicial 2º apellido.
+    - Si aun así existe, añade sufijos numéricos: @nombrex2, @nombrex3, ...
+    """
+    partes = nombre_completo.split()
+    if not partes:
+        return ""
+
+    nombre = partes[0].lower()
+    alias_base = generar_alias_base(nombre_completo)
+
+    # 1) Alias base
+    if alias_base not in existentes:
+        return alias_base
+
+    # 2) Dos iniciales de apellidos
+    if len(partes) > 2:
+        alias_dos_apellidos = f"@{nombre}{partes[1][0].lower()}{partes[2][0].lower()}"
+        if alias_dos_apellidos not in existentes:
+            return alias_dos_apellidos
+
+    # 3) Sufijos numéricos
+    sufijo = 2
+    while True:
+        candidato = f"{alias_base}{sufijo}"
+        if candidato not in existentes:
+            return candidato
+        sufijo += 1
+
+
+# Diccionario global de alias por deportista (sin duplicados)
+ALIAS_DEPORTISTAS = {}
+_alias_usados = set()
+
+for alumno in ALUMNOS:
+    alias = generar_alias_resuelto(alumno, _alias_usados)
+    ALIAS_DEPORTISTAS[alumno] = alias
+    _alias_usados.add(alias)
+
+# -----------------------
 # Tabla de usuarios (para contraseñas actualizadas)
+# -----------------------
 c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
     usuario TEXT PRIMARY KEY,
     password_hash TEXT
@@ -723,10 +767,15 @@ def formulario_informe_general():
 
             st.session_state["taxis_df"] = taxis_df
 
-        submitted = st.form_submit_button("💾 Desar informe general", disabled=disabled)
+        # Botones de guardar
+        col_guardar_1, col_guardar_2 = st.columns(2)
+        with col_guardar_1:
+            submitted_enviar = st.form_submit_button("💾 Desar i enviar", disabled=disabled)
+        with col_guardar_2:
+            submitted_sense_enviar = st.form_submit_button("💾 Desar sense enviar", disabled=disabled)
 
     # --- Desar ---
-    if submitted:
+    if submitted_enviar or submitted_sense_enviar:
         if not info["cuidador"]:
             st.warning("⚠️ Has de seleccionar un cuidador abans de desar l'informe.")
             return
@@ -751,12 +800,17 @@ def formulario_informe_general():
             info["entradas"], info["mantenimiento"], info["temas"],
             info["taxis"], alumnos
         )
-        enviar_correo(
-            f"Informe general - {fecha_mostrar}",
-            f"Adjunt informe general {fecha_mostrar}",
-            [pdf]
-        )
-        st.success("✅ Informe desat i enviat.")
+
+        if submitted_enviar:
+            enviar_correo(
+                f"Informe general - {fecha_mostrar}",
+                f"Adjunt informe general {fecha_mostrar}",
+                [pdf]
+            )
+            st.success("✅ Informe desat i enviat.")
+        else:
+            st.success("✅ Informe desat (sense enviar correu).")
+
         st.session_state["bloqueado"] = True
         st.session_state["confirmar_salir_general"] = False
         st.rerun()
@@ -776,14 +830,7 @@ def formulario_informe_general():
                 st.session_state["confirmar_salir_general"] = False
                 st.rerun()
     else:
-        if st.button("🏠 Tornar al menú", key="volver_inicio_general"):
-            if not st.session_state["bloqueado"]:
-                st.session_state["confirmar_salir_general"] = True
-                st.rerun()
-            else:
-                st.session_state["fecha_cargada"] = None
-                st.session_state["vista_actual"] = "menu"
-                st.rerun()
+        if st.button("🏠
 
         
 # app.py – Bloque 8
@@ -853,7 +900,7 @@ def formulario_informe_individual():
     # -----------------------------------------
     # Funció interna per desar i tornar al menú
     # -----------------------------------------
-    def guardar_i_tornar():
+    def guardar_i_tornar(enviar=True):
         # Validació: alumne obligatori
         if not alumno:
             st.warning("⚠️ Has de seleccionar un alumne abans de desar l'informe.")
@@ -867,23 +914,32 @@ def formulario_informe_individual():
 
         data_text = fecha_sel.strftime("%d/%m/%Y")
         pdf = generar_pdf_individual(alumno, contenido, fecha_iso)
-        enviar_correo(
-            f"Informe individual - {alumno} - {data_text}",
-            f"Adjunt informe individual de {alumno} ({data_text})",
-            [pdf]
-        )
 
-        st.success(f"✅ Informe individual desat i enviat: {pdf}")
+        if enviar:
+            enviar_correo(
+                f"Informe individual - {alumno} - {data_text}",
+                f"Adjunt informe individual de {alumno} ({data_text})",
+                [pdf]
+            )
+            st.success(f"✅ Informe individual desat i enviat: {pdf}")
+        else:
+            st.success(f"✅ Informe individual desat (sense enviar correu): {pdf}")
+
         st.session_state["forzar_edicion_individual"] = False
         st.session_state["confirmar_salir_individual"] = False
         st.session_state["vista_actual"] = "menu"
         st.rerun()
 
     # ================================
-    # BOTÓ PRINCIPAL DE DESAR
+    # BOTONS PRINCIPALS DE DESAR
     # ================================
-    if st.button("💾 Desar informe individual", disabled=bloqueado):
-        guardar_i_tornar()
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        if st.button("💾 Desar i enviar informe", disabled=bloqueado):
+            guardar_i_tornar(enviar=True)
+    with col_b2:
+        if st.button("💾 Desar sense enviar", disabled=bloqueado):
+            guardar_i_tornar(enviar=False)
 
     # ================================
     # PROTECCIÓ SORTIDA SENSE DESAR
@@ -902,7 +958,7 @@ def formulario_informe_individual():
         # Desar i sortir
         with col1:
             if st.button("💾 Desar i tornar al menú", key="confirm_guardar_sortir_individual"):
-                guardar_i_tornar()
+                guardar_i_tornar(enviar=True)
 
         # Sortir sense desar
         with col2:
@@ -928,6 +984,7 @@ def formulario_informe_individual():
             else:
                 st.session_state["vista_actual"] = "menu"
                 st.rerun()
+
 
 # app.py - Bloque 9
 # -----------------------
@@ -1105,6 +1162,11 @@ def consultar_informe_general():
 
     if not row:
         st.info(f"No hi ha informe general guardat per a {fecha_mostrar}.")
+
+        if st.button("🏠 Tornar al menú", key="volver_menu_general_consulta_sense_informe"):
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
+
         return
 
     cuidador, entradas, mantenimiento, temas, taxis_json = row
@@ -1375,6 +1437,136 @@ def generar_pdf_historico_general(desde, hasta):
 
     doc.build(elements)
     return fname
+
+
+# =====================================================
+#   HISTÒRIC TAXIS (PDF + DataFrame)
+# =====================================================
+
+def _recopilar_taxis_en_rang(desde, hasta):
+    """
+    Retorna una llista de files amb tots els taxis en el rang de dates.
+    Cada fila és [data_informe, data_servei, hora, recollida, destí, esportistes, observacions]
+    """
+    c.execute("""
+        SELECT fecha, taxis
+        FROM informes
+        WHERE fecha BETWEEN ? AND ?
+        ORDER BY fecha ASC
+    """, (desde.strftime("%Y-%m-%d"), hasta.strftime("%Y-%m-%d")))
+    registros = c.fetchall()
+
+    filas = []
+
+    for fecha_informe, taxis_json in registros:
+        taxis_list = json.loads(taxis_json) if taxis_json else []
+        if not taxis_list:
+            continue
+
+        # Data de l'informe (YYYY-MM-DD -> dd/mm/aaaa)
+        try:
+            fecha_inf_dt = datetime.strptime(fecha_informe, "%Y-%m-%d")
+            fecha_inf_str = fecha_inf_dt.strftime("%d/%m/%Y")
+        except Exception:
+            fecha_inf_str = fecha_informe
+
+        for t in taxis_list:
+            data_servei = t.get("Fecha", "") or ""
+            hora = t.get("Hora", "") or ""
+            recollida = t.get("Recogida", "") or ""
+            desti = t.get("Destino", "") or ""
+            esportistes = t.get("Deportistas", "") or ""
+            observacions = t.get("Observaciones", "") or ""
+
+            filas.append([
+                fecha_inf_str,
+                data_servei,
+                hora,
+                recollida,
+                desti,
+                esportistes,
+                observacions
+            ])
+
+    return filas
+
+
+def generar_pdf_historico_taxis(desde, hasta):
+    filas = _recopilar_taxis_en_rang(desde, hasta)
+    if not filas:
+        return None
+
+    fname = os.path.join(
+        PDFS_DIR,
+        f"historico_taxis_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
+    )
+
+    doc = SimpleDocTemplate(
+        fname,
+        pagesize=A4,
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2*cm,
+        bottomMargin=2*cm
+    )
+    elements = []
+
+    estilo_titulo = ParagraphStyle(
+        name="TituloTaxis",
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        alignment=TA_CENTER,
+        spaceAfter=8
+    )
+    estilo_sub = ParagraphStyle(
+        name="SubTaxis",
+        fontName="Helvetica",
+        fontSize=12,
+        alignment=TA_CENTER,
+        spaceAfter=12
+    )
+
+    elements.append(Paragraph("Residència Reina Sofia", estilo_titulo))
+    elements.append(Paragraph(
+        f"Històric de serveis de taxi ({desde.strftime('%d/%m/%Y')} - {hasta.strftime('%d/%m/%Y')})",
+        estilo_sub
+    ))
+    elements.append(Spacer(1, 8))
+
+    data = [["Data informe", "Data servei", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
+    data.extend(filas)
+
+    table = Table(data, colWidths=[2.5*cm, 2.5*cm, 2*cm, 3*cm, 3*cm, 3*cm, 3*cm])
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+    ]))
+
+    elements.append(table)
+    doc.build(elements)
+    return fname
+
+
+def obtener_historico_taxis_df(desde, hasta):
+    filas = _recopilar_taxis_en_rang(desde, hasta)
+    if not filas:
+        return None
+
+    columnas = [
+        "Data informe",
+        "Data servei",
+        "Hora",
+        "Recollida",
+        "Destí",
+        "Esportistes",
+        "Observacions"
+    ]
+    df = pd.DataFrame(filas, columns=columnas)
+    return df
+
 
 # app.py - Bloque 10
 # -----------------------
