@@ -912,7 +912,7 @@ def formulario_informe_individual():
             st.session_state["forzar_edicion_individual"] = True
             st.rerun()
 
-    # Camp de contingut
+    # Camp de contingut (valor actual del widget)
     contenido = st.text_area(
         "Contingut de l'informe",
         value=contenido_inicial,
@@ -929,11 +929,20 @@ def formulario_informe_individual():
             st.warning("⚠️ Has de seleccionar un alumne abans de desar l'informe.")
             return
 
+        # Guardam exactament el que hi ha al widget ara mateix
         c.execute(
             "INSERT OR REPLACE INTO informes_alumnos (fecha, alumno, contenido) VALUES (?,?,?)",
             (fecha_iso, alumno, contenido)
         )
         conn.commit()
+
+        # OPCIONAL: debug per comprovar què queda a la BD
+        # c.execute(
+        #     "SELECT contenido FROM informes_alumnos WHERE fecha=? AND alumno=?",
+        #     (fecha_iso, alumno)
+        # )
+        # debug_row = c.fetchone()
+        # st.caption(f"[DEBUG] BD després de desar individual: {debug_row}")
 
         data_text = fecha_sel.strftime("%d/%m/%Y")
         pdf = generar_pdf_individual(alumno, contenido, fecha_iso)
@@ -978,7 +987,7 @@ def formulario_informe_individual():
 
         col1, col2, col3 = st.columns(3)
 
-        # Desar i sortir
+        # Desar i sortir (comportament igual que abans: guarda i envia)
         with col1:
             if st.button("💾 Desar i tornar al menú", key="confirm_guardar_sortir_individual"):
                 guardar_i_tornar(enviar=True)
