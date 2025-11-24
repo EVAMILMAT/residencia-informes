@@ -678,28 +678,28 @@ def formulario_informe_general():
         disabled = bloqueado
 
         idx = cuidadores.index(info["cuidador"]) if info["cuidador"] in cuidadores else 0
-        info["cuidador"] = st.selectbox(
+        cuidador_sel = st.selectbox(
             "Cuidador/a",
             cuidadores,
             index=idx,
             disabled=disabled
         )
 
-        info["entradas"] = st.text_area(
+        entradas_txt = st.text_area(
             "Informe del dia",
             value=info["entradas"],
             height=120,
             disabled=disabled
         )
 
-        info["mantenimiento"] = st.text_area(
+        mantenimiento_txt = st.text_area(
             "Notes per direcció, manteniment i neteja",
             value=info["mantenimiento"],
             height=120,
             disabled=disabled
         )
 
-        info["temas"] = st.text_area(
+        temas_txt = st.text_area(
             "Pícnics pel dia següent",
             value=info["temas"],
             height=120,
@@ -776,9 +776,15 @@ def formulario_informe_general():
 
     # --- Desar ---
     if submitted_enviar or submitted_sense_enviar:
-        if not info["cuidador"]:
+        if not cuidador_sel:
             st.warning("⚠️ Has de seleccionar un cuidador abans de desar l'informe.")
             return
+
+        # Actualitzar explícitament l'estat amb el que hi ha al formulari
+        info["cuidador"] = cuidador_sel
+        info["entradas"] = entradas_txt
+        info["mantenimiento"] = mantenimiento_txt
+        info["temas"] = temas_txt
 
         taxis_records = st.session_state["taxis_df"].to_dict("records")
         info["taxis"] = taxis_records
@@ -791,14 +797,15 @@ def formulario_informe_general():
             (fecha_iso, info["cuidador"], info["entradas"], info["mantenimiento"], info["temas"], taxis_json)
         )
         conn.commit()
-        # DEBUG: comprovar què hi ha realment a la BD per aquest dia
-        c.execute(
-            "SELECT cuidador, entradas_salidas, mantenimiento, temas_genericos "
-            "FROM informes WHERE fecha=?",
-            (fecha_iso,)
-        )
-        debug_row = c.fetchone()
-        st.caption(f"[DEBUG] BD després de desar: {debug_row}")
+
+        # OPCIONAL: debug para verificar exactamente qué hay en BD
+        # c.execute(
+        #     "SELECT cuidador, entradas_salidas, mantenimiento, temas_genericos "
+        #     "FROM informes WHERE fecha=?",
+        #     (fecha_iso,)
+        # )
+        # debug_row = c.fetchone()
+        # st.caption(f"[DEBUG] BD després de desar: {debug_row}")
 
         c.execute("SELECT alumno FROM informes_alumnos WHERE fecha=?", (fecha_iso,))
         alumnos = [r[0] for r in c.fetchall()]
@@ -823,7 +830,7 @@ def formulario_informe_general():
         st.session_state["confirmar_salir_general"] = False
         st.rerun()
 
-     # --- Tornar al menú amb protecció de canvis ---
+    # --- Tornar al menú amb protecció de canvis ---
     if st.session_state.get("confirmar_salir_general", False):
         st.warning("⚠ Hi ha canvis sense desar. Segur que vols tornar al menú?")
         col1, col2 = st.columns(2)
@@ -846,6 +853,7 @@ def formulario_informe_general():
                 st.session_state["fecha_cargada"] = None
                 st.session_state["vista_actual"] = "menu"
                 st.rerun()
+
 
         
 # app.py – Bloque 8
