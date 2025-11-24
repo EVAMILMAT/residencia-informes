@@ -815,7 +815,7 @@ def formulario_informe_general():
         st.session_state["confirmar_salir_general"] = False
         st.rerun()
 
-    # --- Tornar al menú amb protecció de canvis ---
+     # --- Tornar al menú amb protecció de canvis ---
     if st.session_state.get("confirmar_salir_general", False):
         st.warning("⚠ Hi ha canvis sense desar. Segur que vols tornar al menú?")
         col1, col2 = st.columns(2)
@@ -830,7 +830,14 @@ def formulario_informe_general():
                 st.session_state["confirmar_salir_general"] = False
                 st.rerun()
     else:
-        if st.button("🏠
+        if st.button("🏠 Tornar al menú", key="volver_inicio_general"):
+            if not st.session_state["bloqueado"]:
+                st.session_state["confirmar_salir_general"] = True
+                st.rerun()
+            else:
+                st.session_state["fecha_cargada"] = None
+                st.session_state["vista_actual"] = "menu"
+                st.rerun()
 
         
 # app.py – Bloque 8
