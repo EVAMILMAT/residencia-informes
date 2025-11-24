@@ -791,6 +791,14 @@ def formulario_informe_general():
             (fecha_iso, info["cuidador"], info["entradas"], info["mantenimiento"], info["temas"], taxis_json)
         )
         conn.commit()
+        # DEBUG: comprovar què hi ha realment a la BD per aquest dia
+        c.execute(
+            "SELECT cuidador, entradas_salidas, mantenimiento, temas_genericos "
+            "FROM informes WHERE fecha=?",
+            (fecha_iso,)
+        )
+        debug_row = c.fetchone()
+        st.caption(f"[DEBUG] BD després de desar: {debug_row}")
 
         c.execute("SELECT alumno FROM informes_alumnos WHERE fecha=?", (fecha_iso,))
         alumnos = [r[0] for r in c.fetchall()]
