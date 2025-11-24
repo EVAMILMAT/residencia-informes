@@ -1650,6 +1650,20 @@ def main():
         desde = st.date_input("Des de")
         hasta = st.date_input("Fins a")
 
+        st.divider()
+        st.subheader("🔐 Còpia de seguretat de la base de dades")
+        try:
+            with open("informes.db", "rb") as f:
+                st.download_button(
+                    label="📥 Descarregar còpia de 'informes.db'",
+                    data=f,
+                    file_name="informes_backup.db",
+                    mime="application/octet-stream"
+                )
+        except FileNotFoundError:
+            st.warning("No s'ha trobat el fitxer de base de dades 'informes.db'.")
+  
+        
         # ============================================================
         # HISTÓRICO INDIVIDUAL
         # ============================================================
