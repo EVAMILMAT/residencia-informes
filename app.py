@@ -393,7 +393,31 @@ def generar_pdf_general(cuidador, fecha_iso, entradas, mantenimiento, temas, tax
     # --- Taula de taxis ---
     if taxis_list:
         elements.append(Paragraph("<b>Taxis</b>", bloque_titulo))
-        taxis_data = [["Data", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
+
+        # Estils específics per la taula de taxis
+        estilo_taxis_celda = ParagraphStyle(
+            name="TaxisCelda",
+            parent=bloque_texto,
+            fontSize=9,
+            leading=11,
+            wordWrap="CJK"   # Això força el salt de línia dins la cel·la
+        )
+        estilo_taxis_header = ParagraphStyle(
+            name="TaxisHeader",
+            parent=bloque_titulo,
+            fontSize=9,
+            leading=11
+        )
+
+        taxis_data = [[
+            Paragraph("<b>Data</b>", estilo_taxis_header),
+            Paragraph("<b>Hora</b>", estilo_taxis_header),
+            Paragraph("<b>Recollida</b>", estilo_taxis_header),
+            Paragraph("<b>Destí</b>", estilo_taxis_header),
+            Paragraph("<b>Esportistes</b>", estilo_taxis_header),
+            Paragraph("<b>Observacions</b>", estilo_taxis_header),
+        ]]
+
         for t in taxis_list:
             fecha_taxi = t.get("Fecha", "")
             # Convertir si està en format YYYY-MM-DD
@@ -402,21 +426,29 @@ def generar_pdf_general(cuidador, fecha_iso, entradas, mantenimiento, temas, tax
                     fecha_taxi = datetime.strptime(fecha_taxi, "%Y-%m-%d").strftime("%d/%m/%Y")
                 except Exception:
                     pass
+
             taxis_data.append([
-                fecha_taxi,
-                t.get("Hora", ""),
-                t.get("Recogida", ""),
-                t.get("Destino", ""),
-                t.get("Deportistas", ""),
-                t.get("Observaciones", "")
+                Paragraph(str(fecha_taxi or ""), estilo_taxis_celda),
+                Paragraph(str(t.get("Hora", "") or ""), estilo_taxis_celda),
+                Paragraph(str(t.get("Recogida", "") or ""), estilo_taxis_celda),
+                Paragraph(str(t.get("Destino", "") or ""), estilo_taxis_celda),
+                Paragraph(str(t.get("Deportistas", "") or ""), estilo_taxis_celda),
+                Paragraph(str(t.get("Observaciones", "") or ""), estilo_taxis_celda),
             ])
-        tabla_taxis = Table(taxis_data, colWidths=[2.3*cm, 2.3*cm, 3*cm, 3*cm, 3*cm, 3*cm])
-        tabla_taxis.setStyle(tabla_estilo)
+
+        tabla_taxis = Table(
+            taxis_data,
+            colWidths=[2.3*cm, 2.3*cm, 3*cm, 3*cm, 3*cm, 3*cm]
+        )
+        tabla_taxis.setStyle(TableStyle([
+            ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("ALIGN", (0,0), (-1,-1), "LEFT"),
+            ("BACKGROUND", (0,0), (-1,0), colors.whitesmoke),
+            ("WORDWRAP", (0,0), (-1,-1), "CJK"),
+        ]))
+
         elements.append(tabla_taxis)
-
-    doc.build(elements)
-    return fname
-
 
 def generar_pdf_individual(alumno, contenido, fecha_iso):
     fecha_dt = datetime.strptime(fecha_iso, "%Y-%m-%d")
