@@ -390,62 +390,66 @@ def generar_pdf_general(cuidador, fecha_iso, entradas, mantenimiento, temas, tax
         alumnes_str = "\n".join([f"• {a}" for a in alumnos_list])
         bloque("Informes individuals generats aquest dia", alumnes_str)
 
-    # --- Taula de taxis ---
+     # --- Taula de taxis ---
     if taxis_list:
         elements.append(Paragraph("<b>Taxis</b>", bloque_titulo))
 
-        # Estils específics per la taula de taxis
-        estilo_taxis_celda = ParagraphStyle(
-            name="TaxisCelda",
+        # Estilos del contenido de celdas
+        estilo_taxi = ParagraphStyle(
+            name="TaxiCell",
             parent=bloque_texto,
             fontSize=9,
             leading=11,
-            wordWrap="CJK"   # Això força el salt de línia dins la cel·la
+            wordWrap='CJK'  # permite saltos automáticos según ancho de celda
         )
-        estilo_taxis_header = ParagraphStyle(
-            name="TaxisHeader",
+
+        estilo_header = ParagraphStyle(
+            name="TaxiHeader",
             parent=bloque_titulo,
             fontSize=9,
             leading=11
         )
 
+        # Cabecera
         taxis_data = [[
-            Paragraph("<b>Data</b>", estilo_taxis_header),
-            Paragraph("<b>Hora</b>", estilo_taxis_header),
-            Paragraph("<b>Recollida</b>", estilo_taxis_header),
-            Paragraph("<b>Destí</b>", estilo_taxis_header),
-            Paragraph("<b>Esportistes</b>", estilo_taxis_header),
-            Paragraph("<b>Observacions</b>", estilo_taxis_header),
+            Paragraph("<b>Data</b>", estilo_header),
+            Paragraph("<b>Hora</b>", estilo_header),
+            Paragraph("<b>Recollida</b>", estilo_header),
+            Paragraph("<b>Destí</b>", estilo_header),
+            Paragraph("<b>Esportistes</b>", estilo_header),
+            Paragraph("<b>Observacions</b>", estilo_header),
         ]]
 
+        # Filas
         for t in taxis_list:
+
             fecha_taxi = t.get("Fecha", "")
-            # Convertir si està en format YYYY-MM-DD
             if isinstance(fecha_taxi, str) and len(fecha_taxi.split("-")) == 3:
                 try:
                     fecha_taxi = datetime.strptime(fecha_taxi, "%Y-%m-%d").strftime("%d/%m/%Y")
-                except Exception:
+                except:
                     pass
 
             taxis_data.append([
-                Paragraph(str(fecha_taxi or ""), estilo_taxis_celda),
-                Paragraph(str(t.get("Hora", "") or ""), estilo_taxis_celda),
-                Paragraph(str(t.get("Recogida", "") or ""), estilo_taxis_celda),
-                Paragraph(str(t.get("Destino", "") or ""), estilo_taxis_celda),
-                Paragraph(str(t.get("Deportistas", "") or ""), estilo_taxis_celda),
-                Paragraph(str(t.get("Observaciones", "") or ""), estilo_taxis_celda),
+                Paragraph(str(fecha_taxi), estilo_taxi),
+                Paragraph(str(t.get("Hora", "") or ""), estilo_taxi),
+                Paragraph(str(t.get("Recogida", "") or ""), estilo_taxi),
+                Paragraph(str(t.get("Destino", "") or ""), estilo_taxi),
+                Paragraph(str(t.get("Deportistas", "") or "").replace("\n", "<br/>"), estilo_taxi),
+                Paragraph(str(t.get("Observaciones", "") or "").replace("\n", "<br/>"), estilo_taxi)
             ])
 
         tabla_taxis = Table(
             taxis_data,
             colWidths=[2.3*cm, 2.3*cm, 3*cm, 3*cm, 3*cm, 3*cm]
         )
+
         tabla_taxis.setStyle(TableStyle([
             ("GRID", (0,0), (-1,-1), 0.5, colors.black),
             ("VALIGN", (0,0), (-1,-1), "TOP"),
             ("ALIGN", (0,0), (-1,-1), "LEFT"),
             ("BACKGROUND", (0,0), (-1,0), colors.whitesmoke),
-            ("WORDWRAP", (0,0), (-1,-1), "CJK"),
+            ("WORDWRAP", (0,0), (-1,-1), 1)
         ]))
 
         elements.append(tabla_taxis)
