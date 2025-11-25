@@ -454,6 +454,11 @@ def generar_pdf_general(cuidador, fecha_iso, entradas, mantenimiento, temas, tax
 
         elements.append(tabla_taxis)
 
+    # --- Generar PDF i tornar el nom de fitxer ---
+    doc.build(elements)
+    return fname
+
+
 def generar_pdf_individual(alumno, contenido, fecha_iso):
     fecha_dt = datetime.strptime(fecha_iso, "%Y-%m-%d")
     fecha_formateada = fecha_dt.strftime("%d/%m/%Y")
