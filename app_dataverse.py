@@ -391,17 +391,17 @@ class DataverseClient:
             res.append((fecha_iso, rec.get("cr143_contingut") or ""))
         return res
 
-       # =========================================================
+    # =========================================================
     # 🔶 ALUMNOS – taula cr143_esportista (Esportistes residència)
     # =========================================================
     def get_alumnos(self) -> list[dict]:
         """
         Devuelve una lista de dict:
         [{ "nombre": <nom complet>, "alias": <alias> }, ...]
-        usando la tabla 'Esportistes residència'.
+        usando la taula 'Esportistes residència'.
 
-        Detecta de forma automática qué columna es el alias
-        buscando cualquier campo que contenga 'alias' en el nom lògic.
+        Usa ALUMNOS_NAME_FIELD como nom complet
+        y ALUMNOS_ALIAS_FIELD como camp d'àlies.
         """
         data = self.get(ENTITY_ALUMNOS)
         if not data or "value" not in data:
@@ -411,29 +411,23 @@ class DataverseClient:
         if not rows:
             return []
 
-        # Detectar automáticamente la columna de alias
-        alias_key = None
-        sample = rows[0]
-        for k in sample.keys():
-            if "alias" in k.lower():
-                alias_key = k
-                break
-
         res: list[dict] = []
+
         for rec in rows:
-            # Nom complet = columna primària: habitualment <schema_name> + "name" → cr143_esportistaname
-            nombre = (rec.get("cr143_esportistaname") or "").strip()
-
-            alias = ""
-            if alias_key:
-                alias = (rec.get(alias_key) or "").strip()
-
+            # Nom complet
+            nombre = (rec.get(ALUMNOS_NAME_FIELD) or "").strip()
             if not nombre:
                 continue
+
+            # Alias (pot estar buit si no l'has omplert)
+            alias = ""
+            if ALUMNOS_ALIAS_FIELD:
+                alias = (rec.get(ALUMNOS_ALIAS_FIELD) or "").strip()
 
             res.append({"nombre": nombre, "alias": alias})
 
         return res
+
 
 
     # =========================================================
