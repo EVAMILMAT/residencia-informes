@@ -390,7 +390,7 @@ class DataverseClient:
             res.append((fecha_iso, rec.get("cr143_contingut") or ""))
         return res
 
-    # =========================================================
+       # =========================================================
     # 🔶 ALUMNOS – taula cr143_esportista (Esportistes residència)
     # =========================================================
     def get_alumnos(self) -> list[dict]:
@@ -398,20 +398,42 @@ class DataverseClient:
         Devuelve una lista de dict:
         [{ "nombre": <nom complet>, "alias": <alias> }, ...]
         usando la tabla 'Esportistes residència'.
+
+        Detecta de forma automática qué columna es el alias
+        buscando cualquier campo que contenga 'alias' en el nom lògic.
         """
         data = self.get(ENTITY_ALUMNOS)
         if not data or "value" not in data:
             return []
 
+        rows = data["value"]
+        if not rows:
+            return []
+
+        # Detectar automáticamente la columna de alias
+        alias_key = None
+        sample = rows[0]
+        for k in sample.keys():
+            if "alias" in k.lower():
+                alias_key = k
+                break
+
         res: list[dict] = []
-        for rec in data["value"]:
+        for rec in rows:
             # Nom complet = columna primària: habitualment <schema_name> + "name" → cr143_esportistaname
             nombre = (rec.get("cr143_esportistaname") or "").strip()
-            alias = (rec.get("cr143_alias") or "").strip()
+
+            alias = ""
+            if alias_key:
+                alias = (rec.get(alias_key) or "").strip()
+
             if not nombre:
                 continue
+
             res.append({"nombre": nombre, "alias": alias})
+
         return res
+
 
     # =========================================================
     # 🔶 HELPERS EXTRA PARA HISTÓRICOS Y CONSULTAS
@@ -2192,10 +2214,8 @@ def main():
         login()
         return
 
-    # --- Càrrega d'esportistes des de Dataverse (una sola vegada per sessió) ---
-    if "alumnos_cargados" not in st.session_state:
-        cargar_alumnos_desde_dataverse()
-        st.session_state["alumnos_cargados"] = True
+    # --- Càrrega d'esportistes des de Dataverse (sempre actualitzat) ---
+    cargar_alumnos_desde_dataverse()
 
     # --- Barra lateral ---
     st.sidebar.markdown(f"👤 Usuari: **{st.session_state.get('usuario','').capitalize()}**")
