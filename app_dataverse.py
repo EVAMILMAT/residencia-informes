@@ -413,6 +413,103 @@ class DataverseClient:
             res.append({"nombre": nombre, "alias": alias})
         return res
 
+    # =========================================================
+    # 🔶 HELPERS EXTRA PARA HISTÓRICOS Y CONSULTAS
+    # =========================================================
+    def get_alumnos_con_informe_en_fecha(self, fecha_iso: str) -> list[str]:
+        """
+        Retorna la llista d'alumnes que tenen informe individual per a una data.
+        Serveix per llistat al PDF d'informe general.
+        """
+        fecha_esc = fecha_iso.replace("'", "''")
+        filtro = f"cr143_codigofecha eq '{fecha_esc}'"
+        endpoint = f"{ENTITY_INDIV}?$filter={filtro}&$select=cr143_alumne"
+        data = self.get(endpoint)
+
+        alumnes: list[str] = []
+        rows = data.get("value", []) if data else []
+        for rec in rows:
+            nom = (rec.get("cr143_alumne") or "").strip()
+            if nom and nom not in alumnes:
+                alumnes.append(nom)
+        return alumnes
+
+    def get_informes_generales_rango(self, desde_iso: str, hasta_iso: str) -> list[dict]:
+        """
+        Retorna una llista de dicts d'informes generals entre dues dates (YYYY-MM-DD).
+        """
+        desde_esc = desde_iso.replace("'", "''")
+        hasta_esc = hasta_iso.replace("'", "''")
+
+        filtro = f"cr143_codigofecha ge '{desde_esc}' and cr143_codigofecha le '{hasta_esc}'"
+        select = ",".join([
+            "cr143_informegeneralid",
+            "cr143_codigofecha",
+            "cr143_cuidador",
+            "cr143_informedeldia",
+            "cr143_notesdireccio",
+            "cr143_picnics",
+        ])
+        endpoint = (
+            f"{ENTITY_INFORMES}"
+            f"?$filter={filtro}"
+            f"&$orderby=cr143_codigofecha asc"
+            f"&$select={select}"
+        )
+
+        data = self.get(endpoint)
+        rows = data.get("value", []) if data else []
+
+        res: list[dict] = []
+        for rec in rows:
+            fecha_raw = (rec.get("cr143_codigofecha") or "").strip()
+            fecha_iso = fecha_raw.split("T")[0] if fecha_raw else ""
+            res.append({
+                "id": rec.get("cr143_informegeneralid"),
+                "fecha": fecha_iso,
+                "cuidador": rec.get("cr143_cuidador") or "",
+                "entradas": rec.get("cr143_informedeldia") or "",
+                "mantenimiento": rec.get("cr143_notesdireccio") or "",
+                "temas": rec.get("cr143_picnics") or "",
+            })
+        return res
+
+    def get_informes_generales_todos(self) -> list[dict]:
+        """
+        Retorna tots els informes generals (ordenats descendent per data).
+        Per a consultes de mencions.
+        """
+        select = ",".join([
+            "cr143_informegeneralid",
+            "cr143_codigofecha",
+            "cr143_cuidador",
+            "cr143_informedeldia",
+            "cr143_notesdireccio",
+            "cr143_picnics",
+        ])
+        endpoint = (
+            f"{ENTITY_INFORMES}"
+            f"?$orderby=cr143_codigofecha desc"
+            f"&$select={select}"
+        )
+
+        data = self.get(endpoint)
+        rows = data.get("value", []) if data else []
+
+        res: list[dict] = []
+        for rec in rows:
+            fecha_raw = (rec.get("cr143_codigofecha") or "").strip()
+            fecha_iso = fecha_raw.split("T")[0] if fecha_raw else ""
+            res.append({
+                "id": rec.get("cr143_informegeneralid"),
+                "fecha": fecha_iso,
+                "cuidador": rec.get("cr143_cuidador") or "",
+                "entradas": rec.get("cr143_informedeldia") or "",
+                "mantenimiento": rec.get("cr143_notesdireccio") or "",
+                "temas": rec.get("cr143_picnics") or "",
+            })
+        return res
+
 
 # Instancia global del cliente Dataverse
 DV = DataverseClient()
@@ -894,12 +991,17 @@ def mostrar_menu():
         consultar_informe_individual()
 
 
-# app.py - Bloque 6
+# app_dataverse.py – Bloque 6
+# -----------------------
+# Funcions d'ajuda (adaptades a Dataverse)
+# -----------------------
 
-# -----------------------
-# Funciones de ayuda
-# -----------------------
 def limpiar_formulario_general():
+    """
+    Reinicia tot l'estat relacionat amb l'informe general i torna al menú.
+    Pensat per si en un futur vols cridar-ho explícitament des d'algun botó.
+    """
+    # Estat antic (per compatibilitat, encara que ja no s'utilitza directament)
     st.session_state["form_general"] = {
         "fecha": "",
         "cuidador": "",
@@ -908,32 +1010,87 @@ def limpiar_formulario_general():
         "temas": "",
         "taxis": []
     }
-    st.session_state["taxis_data"] = []
-    st.session_state["confirm_overwrite"] = None
+
+    # Estat nou usat al formulari d'informe general (Bloc 7)
+    st.session_state["informe_general"] = {
+        "cuidador": "",
+        "entradas": "",
+        "mantenimiento": "",
+        "temas": "",
+        "taxis": []
+    }
+    st.session_state["taxis_df"] = pd.DataFrame(
+        columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observaciones"]
+    )
+    st.session_state["fecha_cargada"] = None
+    st.session_state["bloqueado"] = False
+    st.session_state["confirmar_salir_general"] = False
+    st.session_state["informe_general_id"] = None
+
+    # Tornar al menú
     st.session_state["vista_actual"] = "menu"
 
+
 def limpiar_formulario_individual():
+    """
+    Reinicia tot l'estat relacionat amb l'informe individual i torna al menú.
+    Pensat per si en un futur vols cridar-ho explícitament des d'algun botó.
+    """
+    # Estat antic (per compatibilitat, encara que ja no s'utilitza directament)
     st.session_state["form_individual"] = {
         "fecha": "",
         "alumno": "",
         "contenido": ""
     }
-    st.session_state["confirm_overwrite_ind"] = None
+
+    # Estat nou usat al formulari d'informe individual (Bloc 8)
+    st.session_state["forzar_edicion_individual"] = False
+    st.session_state["alumno_actual_informe"] = ""
+    st.session_state["confirmar_salir_individual"] = False
+
+    # Tornar al menú
     st.session_state["vista_actual"] = "menu"
 
-def comprobar_sobrescribir_general(fecha_iso):
-    c.execute("SELECT * FROM informes WHERE fecha=?", (fecha_iso,))
-    row = c.fetchone()
-    return row is not None
 
-def comprobar_sobrescribir_individual(fecha_iso, alumno):
-    c.execute("SELECT * FROM informes_alumnos WHERE fecha=? AND alumno=?", (fecha_iso, alumno))
-    row = c.fetchone()
-    return row is not None
+# -------------------------------------------------------
+# Funcions de comprovació de sobrescriptura (Dataverse)
+# No s'utilitzen directament als blocs nous, però
+# queden disponibles per si les vols fer servir.
+# -------------------------------------------------------
 
-# app.py – Bloque 7
+def comprobar_sobrescribir_general(fecha_iso: str) -> bool:
+    """
+    Indica si ja existeix un informe general per a aquesta data a Dataverse.
+    Equivalent lògic a l'antic SELECT ... FROM informes WHERE fecha=?
+    """
+    try:
+        informe = DV.get_informe_general(fecha_iso)
+    except Exception as e:
+        st.error(f"Error comprovant informe general a Dataverse: {e}")
+        return False
+
+    return informe is not None
+
+
+def comprobar_sobrescribir_individual(fecha_iso: str, alumno: str) -> bool:
+    """
+    Indica si ja existeix un informe individual (data, alumne) a Dataverse.
+    Equivalent lògic a l'antic SELECT ... FROM informes_alumnos WHERE ...
+    """
+    if not alumno:
+        return False
+
+    try:
+        informe = DV.get_informe_individual(fecha_iso, alumno)
+    except Exception as e:
+        st.error(f"Error comprovant informe individual a Dataverse: {e}")
+        return False
+
+    return informe is not None
+
+# app_dataverse.py – Bloque 7
 # -----------------------
-# Formulari Informe General
+# Formulari Informe General (Dataverse)
 # -----------------------
 
 def formulario_informe_general():
@@ -961,6 +1118,8 @@ def formulario_informe_general():
         )
     if "confirmar_salir_general" not in st.session_state:
         st.session_state["confirmar_salir_general"] = False
+    if "informe_general_id" not in st.session_state:
+        st.session_state["informe_general_id"] = None
 
     # --- Data de l'informe ---
     fecha_sel = st.date_input("Data de l'informe", value=date.today(), key="fecha_general")
@@ -968,32 +1127,45 @@ def formulario_informe_general():
     fecha_mostrar = fecha_sel.strftime("%d/%m/%Y")
     st.markdown(f"**Data seleccionada:** {fecha_mostrar}")
 
-    # --- Carrega des de BD quan canvia la data ---
+    # --- Carrega des de Dataverse quan canvia la data ---
     if st.session_state["fecha_cargada"] != fecha_iso:
         st.session_state["fecha_cargada"] = fecha_iso
 
-        c.execute(
-            "SELECT cuidador, entradas_salidas, mantenimiento, temas_genericos, taxis "
-            "FROM informes WHERE fecha=?",
-            (fecha_iso,)
-        )
-        row = c.fetchone()
+        try:
+            informe = DV.get_informe_general(fecha_iso)
+        except Exception as e:
+            st.error(f"Error llegint l'informe general des de Dataverse: {e}")
+            informe = None
 
-        if row:
-            cuidador, entradas, mantenimiento, temas, taxis_json = row
+        if informe:
+            # Hi ha informe a Dataverse → omplim i bloquejam
             st.session_state["informe_general"] = {
-                "cuidador": cuidador or "",
-                "entradas": entradas or "",
-                "mantenimiento": mantenimiento or "",
-                "temas": temas or "",
-                "taxis": json.loads(taxis_json) if taxis_json else []
+                "cuidador": informe.get("cuidador", "") or "",
+                "entradas": informe.get("entradas", "") or "",
+                "mantenimiento": informe.get("mantenimiento", "") or "",
+                "temas": informe.get("temas", "") or "",
+                "taxis": []
             }
+            informe_id = informe.get("id")
+            st.session_state["informe_general_id"] = informe_id
+
+            # Carregam taxis associats a l'informe
+            taxis = []
+            if informe_id:
+                try:
+                    taxis = DV.get_taxis_by_informe(informe_id)
+                except Exception as e:
+                    st.error(f"Error llegint taxis des de Dataverse: {e}")
+                    taxis = []
+
+            st.session_state["informe_general"]["taxis"] = taxis
             st.session_state["taxis_df"] = pd.DataFrame(
-                st.session_state["informe_general"]["taxis"],
+                taxis,
                 columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observaciones"]
             )
             st.session_state["bloqueado"] = True
         else:
+            # No hi ha informe per aquest dia → formulari en blanc
             st.session_state["informe_general"] = {
                 "cuidador": "",
                 "entradas": "",
@@ -1005,6 +1177,7 @@ def formulario_informe_general():
                 columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observaciones"]
             )
             st.session_state["bloqueado"] = False
+            st.session_state["informe_general_id"] = None
 
         st.session_state["confirmar_salir_general"] = False
 
@@ -1088,7 +1261,7 @@ def formulario_informe_general():
                         a = "20" + a
                     try:
                         return datetime.strptime(f"{d}/{m}/{a}", "%d/%m/%Y").strftime("%d/%m/%Y")
-                    except:
+                    except Exception:
                         return v
                 return v
 
@@ -1109,7 +1282,7 @@ def formulario_informe_general():
                 for fmt in ["%H:%M", "%H:%M:%S", "%H:%M:%S.%f"]:
                     try:
                         return datetime.strptime(v, fmt).strftime("%H:%M")
-                    except:
+                    except Exception:
                         pass
                 return v
 
@@ -1127,13 +1300,12 @@ def formulario_informe_general():
         with col_guardar_2:
             submitted_sense_enviar = st.form_submit_button("💾 Desar sense enviar", disabled=disabled)
 
-    # --- Desar ---
+    # --- Desar a Dataverse ---
     if submitted_enviar or submitted_sense_enviar:
         if not cuidador_sel:
             st.warning("⚠️ Has de seleccionar un cuidador abans de desar l'informe.")
             return
 
-        # Actualitzar explícitament l'estat amb el que hi ha al formulari
         info["cuidador"] = cuidador_sel
         info["entradas"] = entradas_txt
         info["mantenimiento"] = mantenimiento_txt
@@ -1141,28 +1313,29 @@ def formulario_informe_general():
 
         taxis_records = st.session_state["taxis_df"].to_dict("records")
         info["taxis"] = taxis_records
-        taxis_json = json.dumps(taxis_records)
 
-        c.execute(
-            "INSERT OR REPLACE INTO informes "
-            "(fecha, cuidador, entradas_salidas, mantenimiento, temas_genericos, taxis) "
-            "VALUES (?,?,?,?,?,?)",
-            (fecha_iso, info["cuidador"], info["entradas"], info["mantenimiento"], info["temas"], taxis_json)
-        )
-        conn.commit()
+        try:
+            # 1) Upsert informe general
+            informe_id = DV.upsert_informe_general(
+                fecha_iso,
+                info["cuidador"],
+                info["entradas"],
+                info["mantenimiento"],
+                info["temas"],
+            )
+            st.session_state["informe_general_id"] = informe_id
 
-        # OPCIONAL: debug para verificar exactamente qué hay en BD
-        # c.execute(
-        #     "SELECT cuidador, entradas_salidas, mantenimiento, temas_genericos "
-        #     "FROM informes WHERE fecha=?",
-        #     (fecha_iso,)
-        # )
-        # debug_row = c.fetchone()
-        # st.caption(f"[DEBUG] BD després de desar: {debug_row}")
+            # 2) Reemplaçar taxis associats
+            DV.replace_taxis_for_informe(informe_id, fecha_iso, taxis_records)
 
-        c.execute("SELECT alumno FROM informes_alumnos WHERE fecha=?", (fecha_iso,))
-        alumnos = [r[0] for r in c.fetchall()]
+            # 3) Llista d'alumnes amb informe individual aquell dia (per al PDF)
+            alumnos = DV.get_alumnos_con_informe_en_fecha(fecha_iso)
 
+        except Exception as e:
+            st.error(f"Error desant l'informe general a Dataverse: {e}")
+            return
+
+        # Generar PDF
         pdf = generar_pdf_general(
             info["cuidador"], fecha_iso,
             info["entradas"], info["mantenimiento"], info["temas"],
@@ -1175,9 +1348,9 @@ def formulario_informe_general():
                 f"Adjunt informe general {fecha_mostrar}",
                 [pdf]
             )
-            st.success("✅ Informe desat i enviat.")
+            st.success("✅ Informe desat a Dataverse i enviat per correu.")
         else:
-            st.success("✅ Informe desat (sense enviar correu).")
+            st.success("✅ Informe desat a Dataverse (sense enviar correu).")
 
         st.session_state["bloqueado"] = True
         st.session_state["confirmar_salir_general"] = False
@@ -1208,10 +1381,11 @@ def formulario_informe_general():
                 st.rerun()
 
 
+
         
-# app.py – Bloque 8
+# app_dataverse.py – Bloque 8
 # -----------------------
-# Formulari Informe Individual
+# Formulari Informe Individual (Dataverse)
 # -----------------------
 
 def formulario_informe_individual():
@@ -1241,20 +1415,21 @@ def formulario_informe_individual():
         st.session_state["forzar_edicion_individual"] = False
 
     # ----------------------------------------------------
-    # Comprovar si ja existeix informe i carregar contingut
+    # Comprovar si ja existeix informe (Dataverse) i carregar contingut
     # ----------------------------------------------------
     contenido_inicial = ""
     tiene_informe = False
 
     if alumno:
-        c.execute(
-            "SELECT contenido FROM informes_alumnos WHERE fecha=? AND alumno=?",
-            (fecha_iso, alumno)
-        )
-        row = c.fetchone()
-        if row:
+        try:
+            rec = DV.get_informe_individual(fecha_iso, alumno)
+        except Exception as e:
+            st.error(f"Error llegint informe individual des de Dataverse: {e}")
+            rec = None
+
+        if rec:
             tiene_informe = True
-            contenido_inicial = row[0] or ""
+            contenido_inicial = rec.get("contenido", "") or ""
 
     bloqueado = tiene_informe and not st.session_state["forzar_edicion_individual"]
 
@@ -1282,20 +1457,18 @@ def formulario_informe_individual():
             st.warning("⚠️ Has de seleccionar un alumne abans de desar l'informe.")
             return
 
-        # Guardam exactament el que hi ha al widget ara mateix
-        c.execute(
-            "INSERT OR REPLACE INTO informes_alumnos (fecha, alumno, contenido) VALUES (?,?,?)",
-            (fecha_iso, alumno, contenido)
-        )
-        conn.commit()
+        alias = ALIAS_DEPORTISTAS.get(alumno) or generar_alias(alumno)
 
-        # OPCIONAL: debug per comprovar què queda a la BD
-        # c.execute(
-        #     "SELECT contenido FROM informes_alumnos WHERE fecha=? AND alumno=?",
-        #     (fecha_iso, alumno)
-        # )
-        # debug_row = c.fetchone()
-        # st.caption(f"[DEBUG] BD després de desar individual: {debug_row}")
+        try:
+            DV.upsert_informe_individual(
+                fecha_iso=fecha_iso,
+                alumno=alumno,
+                alias=alias,
+                contenido=contenido or "",
+            )
+        except Exception as e:
+            st.error(f"Error desant l'informe individual a Dataverse: {e}")
+            return
 
         data_text = fecha_sel.strftime("%d/%m/%Y")
         pdf = generar_pdf_individual(alumno, contenido, fecha_iso)
@@ -1306,9 +1479,9 @@ def formulario_informe_individual():
                 f"Adjunt informe individual de {alumno} ({data_text})",
                 [pdf]
             )
-            st.success(f"✅ Informe individual desat i enviat: {pdf}")
+            st.success(f"✅ Informe individual desat a Dataverse i enviat: {pdf}")
         else:
-            st.success(f"✅ Informe individual desat (sense enviar correu): {pdf}")
+            st.success(f"✅ Informe individual desat a Dataverse (sense enviar correu): {pdf}")
 
         st.session_state["forzar_edicion_individual"] = False
         st.session_state["confirmar_salir_individual"] = False
@@ -1329,18 +1502,17 @@ def formulario_informe_individual():
     # ================================
     # PROTECCIÓ SORTIDA SENSE DESAR
     # ================================
-    # Avaluam dades directament dels widgets
     tiene_datos = (
         (alumno is not None and alumno != "") or
         (contenido is not None and contenido.strip() != "")
     )
 
-    if st.session_state["confirmar_salir_individual"]:
+    if st.session_state.get("confirmar_salir_individual", False):
         st.warning("⚠ Hi ha canvis sense desar. Vols desar l'informe abans de sortir?")
 
         col1, col2, col3 = st.columns(3)
 
-        # Desar i sortir (comportament igual que abans: guarda i envia)
+        # Desar i sortir
         with col1:
             if st.button("💾 Desar i tornar al menú", key="confirm_guardar_sortir_individual"):
                 guardar_i_tornar(enviar=True)
@@ -1353,7 +1525,7 @@ def formulario_informe_individual():
                 st.session_state["vista_actual"] = "menu"
                 st.rerun()
 
-        # Cancel·lar (quedar-se a la pantalla i no sortir)
+        # Cancel·lar
         with col3:
             if st.button("Cancel·lar", key="cancelar_sortida_individual"):
                 st.session_state["confirmar_salir_individual"] = False
@@ -1370,10 +1542,9 @@ def formulario_informe_individual():
                 st.session_state["vista_actual"] = "menu"
                 st.rerun()
 
-
-# app.py - Bloque 9
+# app_dataverse.py - Bloque 9
 # -----------------------
-# Consultes i Històrics
+# Consultes i Històrics (Dataverse)
 # -----------------------
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -1382,6 +1553,9 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.styles import ParagraphStyle
 from datetime import datetime
 import re
+import os
+import json
+import pandas as pd
 
 
 # =====================================================
@@ -1422,7 +1596,7 @@ def hay_mencion_de(alumno, texto):
 
 
 # =====================================================
-#   CONSULTAR INFORME INDIVIDUAL I MENCIONS
+#   CONSULTAR INFORME INDIVIDUAL I MENCIONS (Dataverse)
 # =====================================================
 
 def consultar_informe_individual():
@@ -1441,22 +1615,24 @@ def consultar_informe_individual():
         return
 
     # -------------------------------------------------
-    # 1) INFORMES INDIVIDUALS
+    # 1) INFORMES INDIVIDUALS (Dataverse)
     # -------------------------------------------------
     if tipo == "Informes individuals":
-        c.execute("""
-            SELECT fecha, contenido 
-            FROM informes_alumnos 
-            WHERE alumno=? 
-            ORDER BY fecha DESC
-        """, (alumno,))
-        registros = c.fetchall()
+        try:
+            # Llista de (fecha_iso, contenido) ordenada desc
+            registros = DV.get_informes_individuales_por_alumno(alumno)
+        except Exception as e:
+            st.error(f"Error llegint informes individuals de Dataverse: {e}")
+            registros = []
 
         if not registros:
             st.info("No hi ha informes individuals per aquest esportista.")
         else:
-            for fecha, contenido in registros:
-                fecha_mostrar = datetime.strptime(fecha, "%Y-%m-%d").strftime("%d/%m/%Y")
+            for fecha_iso, contenido in registros:
+                if fecha_iso:
+                    fecha_mostrar = datetime.strptime(fecha_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+                else:
+                    fecha_mostrar = "—"
 
                 st.markdown(
                     f"""
@@ -1469,19 +1645,24 @@ def consultar_informe_individual():
                 )
 
     # -------------------------------------------------
-    # 2) MENCIONS EN INFORMES GENERALS
+    # 2) MENCIONS EN INFORMES GENERALS (Dataverse)
     # -------------------------------------------------
     else:
-        c.execute("""
-            SELECT fecha, cuidador, entradas_salidas, mantenimiento, temas_genericos
-            FROM informes
-            ORDER BY fecha DESC
-        """)
-        registros = c.fetchall()
+        try:
+            informes = DV.get_informes_generales_todos()
+        except Exception as e:
+            st.error(f"Error llegint informes generals de Dataverse: {e}")
+            informes = []
 
         menciones = []
 
-        for fecha, cuidador, entradas, mantenimiento, temas in registros:
+        for rec in informes:
+            fecha = rec.get("fecha") or ""
+            cuidador = rec.get("cuidador") or ""
+            entradas = rec.get("entradas") or ""
+            mantenimiento = rec.get("mantenimiento") or ""
+            temas = rec.get("temas") or ""
+
             campos = {}
 
             frags_e = extraer_menciones_de(alumno, entradas)
@@ -1502,8 +1683,11 @@ def consultar_informe_individual():
         if not menciones:
             st.info("No hi ha mencions d'aquest esportista als informes generals.")
         else:
-            for fecha, cuidador, campos in menciones:
-                fecha_mostrar = datetime.strptime(fecha, "%Y-%m-%d").strftime("%d/%m/%Y")
+            for fecha_iso, cuidador, campos in menciones:
+                if fecha_iso:
+                    fecha_mostrar = datetime.strptime(fecha_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+                else:
+                    fecha_mostrar = "—"
 
                 st.markdown(f"### 📅 {fecha_mostrar} — 🧑‍💼 {cuidador or '—'}")
 
@@ -1526,27 +1710,30 @@ def consultar_informe_individual():
 
 
 # =====================================================
-#   CONSULTAR INFORME GENERAL
+#   CONSULTAR INFORME GENERAL (Dataverse)
 # =====================================================
 
 def consultar_informe_general():
     st.header("🔎 Consultar informe general")
 
-    fecha_sel = st.date_input("Selecciona la data de l'informe", value=date.today(), key="fecha_consulta_general")
+    fecha_sel = st.date_input(
+        "Selecciona la data de l'informe",
+        value=date.today(),
+        key="fecha_consulta_general"
+    )
     fecha_iso = fecha_sel.isoformat()
     fecha_mostrar = fecha_sel.strftime("%d/%m/%Y")
 
     st.markdown(f"**Data seleccionada:** {fecha_mostrar}")
 
-    c.execute("""
-        SELECT cuidador, entradas_salidas, mantenimiento, temas_genericos, taxis 
-        FROM informes 
-        WHERE fecha=?
-    """, (fecha_iso,))
-    row = c.fetchone()
+    try:
+        informe = DV.get_informe_general(fecha_iso)
+    except Exception as e:
+        st.error(f"Error llegint informe general des de Dataverse: {e}")
+        informe = None
 
-    if not row:
-        st.info(f"No hi ha informe general guardat per a {fecha_mostrar}.")
+    if not informe:
+        st.info(f"No hi ha informe general guardat a Dataverse per a {fecha_mostrar}.")
 
         if st.button("🏠 Tornar al menú", key="volver_menu_general_consulta_sense_informe"):
             st.session_state["vista_actual"] = "menu"
@@ -1554,7 +1741,17 @@ def consultar_informe_general():
 
         return
 
-    cuidador, entradas, mantenimiento, temas, taxis_json = row
+    cuidador = informe.get("cuidador") or ""
+    entradas = informe.get("entradas") or ""
+    mantenimiento = informe.get("mantenimiento") or ""
+    temas = informe.get("temas") or ""
+    informe_id = informe.get("id")
+
+    try:
+        taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
+    except Exception as e:
+        st.error(f"Error llegint taxis de Dataverse: {e}")
+        taxis_list = []
 
     st.markdown(
         f"""
@@ -1600,7 +1797,6 @@ def consultar_informe_general():
     )
 
     # Taxis
-    taxis_list = json.loads(taxis_json) if taxis_json else []
     if taxis_list:
         st.markdown(
             """
@@ -1618,10 +1814,13 @@ def consultar_informe_general():
 
 
 # =====================================================
-#   HISTÒRIC INDIVIDUAL (AMB MENCIONS)
+#   HISTÒRIC INDIVIDUAL (AMB MENCIONS) – Dataverse
 # =====================================================
 
 def generar_pdf_historico_individual(alumno, desde, hasta):
+    desde_iso = desde.strftime("%Y-%m-%d")
+    hasta_iso = hasta.strftime("%Y-%m-%d")
+
     fname = os.path.join(
         PDFS_DIR,
         f"historico_individual_{alumno.replace(' ','_')}_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
@@ -1647,28 +1846,36 @@ def generar_pdf_historico_individual(alumno, desde, hasta):
     estilo_texto = ParagraphStyle(name="Texto", fontName="Helvetica",
                                   fontSize=10, leading=14)
 
-    # Informes individuals
-    c.execute("""
-        SELECT fecha, contenido 
-        FROM informes_alumnos 
-        WHERE alumno=? 
-          AND fecha BETWEEN ? AND ? 
-        ORDER BY fecha ASC
-    """, (alumno, desde.strftime("%Y-%m-%d"), hasta.strftime("%Y-%m-%d")))
-    registros_ind = c.fetchall()
+    # Informes individuals (Dataverse)
+    try:
+        todos_ind = DV.get_informes_individuales_por_alumno(alumno)
+    except Exception as e:
+        st.error(f"Error llegint informes individuals de Dataverse: {e}")
+        todos_ind = []
 
-    # Mencions generals
-    c.execute("""
-        SELECT fecha, cuidador, entradas_salidas, mantenimiento, temas_genericos
-        FROM informes
-        WHERE fecha BETWEEN ? AND ?
-        ORDER BY fecha ASC
-    """, (desde.strftime("%Y-%m-%d"), hasta.strftime("%Y-%m-%d")))
-    registros_gen = c.fetchall()
+    registros_ind = []
+    for fecha_iso_val, contenido in todos_ind:
+        if not fecha_iso_val:
+            continue
+        if desde_iso <= fecha_iso_val <= hasta_iso:
+            registros_ind.append((fecha_iso_val, contenido))
+
+    # Mencions generals (Dataverse)
+    try:
+        informes_gen = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+    except Exception as e:
+        st.error(f"Error llegint informes generals de Dataverse: {e}")
+        informes_gen = []
 
     menciones = []
 
-    for fecha, cuidador, entradas, mantenimiento, temas in registros_gen:
+    for rec in informes_gen:
+        fecha = rec.get("fecha") or ""
+        cuidador = rec.get("cuidador") or ""
+        entradas = rec.get("entradas") or ""
+        mantenimiento = rec.get("mantenimiento") or ""
+        temas = rec.get("temas") or ""
+
         campos = {}
 
         frags_e = extraer_menciones_de(alumno, entradas)
@@ -1699,8 +1906,8 @@ def generar_pdf_historico_individual(alumno, desde, hasta):
         elements.append(Paragraph("A) Informes individuals", estilo_titulo_bloque))
         elements.append(Spacer(1, 6))
 
-        for fecha, contenido in registros_ind:
-            fecha_mostrar = datetime.strptime(fecha, "%Y-%m-%d").strftime("%d/%m/%Y")
+        for fecha_iso_val, contenido in registros_ind:
+            fecha_mostrar = datetime.strptime(fecha_iso_val, "%Y-%m-%d").strftime("%d/%m/%Y")
             elements.append(Paragraph(f"Informe del dia {fecha_mostrar}", estilo_fecha))
             elements.append(Paragraph((contenido or "—").replace("\n", "<br/>"), estilo_texto))
             elements.append(Spacer(1, 8))
@@ -1713,8 +1920,8 @@ def generar_pdf_historico_individual(alumno, desde, hasta):
         elements.append(Paragraph("B) Mencions als informes generals", estilo_titulo_bloque))
         elements.append(Spacer(1, 6))
 
-        for fecha, cuidador, campos in menciones:
-            fecha_mostrar = datetime.strptime(fecha, "%Y-%m-%d").strftime("%d/%m/%Y")
+        for fecha_iso_val, cuidador, campos in menciones:
+            fecha_mostrar = datetime.strptime(fecha_iso_val, "%Y-%m-%d").strftime("%d/%m/%Y")
             elements.append(Paragraph(f"Informe general del dia {fecha_mostrar}", estilo_fecha))
             elements.append(Paragraph(f"<b>Cuidador/a:</b> {cuidador or '—'}", estilo_texto))
             elements.append(Spacer(1, 4))
@@ -1734,10 +1941,13 @@ def generar_pdf_historico_individual(alumno, desde, hasta):
 
 
 # =====================================================
-#   HISTÒRIC GENERAL
+#   HISTÒRIC GENERAL – Dataverse
 # =====================================================
 
 def generar_pdf_historico_general(desde, hasta):
+    desde_iso = desde.strftime("%Y-%m-%d")
+    hasta_iso = hasta.strftime("%Y-%m-%d")
+
     fname = os.path.join(
         PDFS_DIR,
         f"historico_general_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
@@ -1756,13 +1966,11 @@ def generar_pdf_historico_general(desde, hasta):
     estilo_titulo = ParagraphStyle(name="Titulo", fontName="Helvetica-Bold", fontSize=12, spaceAfter=4)
     estilo_texto = ParagraphStyle(name="Texto", fontName="Helvetica", fontSize=10, leading=14)
 
-    c.execute("""
-        SELECT fecha, cuidador, entradas_salidas, mantenimiento, temas_genericos, taxis
-        FROM informes
-        WHERE fecha BETWEEN ? AND ?
-        ORDER BY fecha ASC
-    """, (desde.strftime("%Y-%m-%d"), hasta.strftime("%Y-%m-%d")))
-    registros = c.fetchall()
+    try:
+        registros = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+    except Exception as e:
+        st.error(f"Error llegint informes generals de Dataverse: {e}")
+        registros = []
 
     if not registros:
         return None
@@ -1777,8 +1985,24 @@ def generar_pdf_historico_general(desde, hasta):
     ))
     elements.append(Spacer(1, 12))
 
-    for fecha, cuidador, entradas, mantenimiento, temas, taxis_json in registros:
-        fecha_mostrar = datetime.strptime(fecha, "%Y-%m-%d").strftime("%d/%m/%Y")
+    for rec in registros:
+        fecha_iso_val = rec.get("fecha") or ""
+        cuidador = rec.get("cuidador") or ""
+        entradas = rec.get("entradas") or ""
+        mantenimiento = rec.get("mantenimiento") or ""
+        temas = rec.get("temas") or ""
+        informe_id = rec.get("id")
+
+        try:
+            taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
+        except Exception as e:
+            st.error(f"Error llegint taxis de Dataverse: {e}")
+            taxis_list = []
+
+        fecha_mostrar = (
+            datetime.strptime(fecha_iso_val, "%Y-%m-%d").strftime("%d/%m/%Y")
+            if fecha_iso_val else "—"
+        )
 
         elements.append(Paragraph(f"Informe del dia {fecha_mostrar}", estilo_fecha))
         elements.append(Paragraph(f"<b>Cuidador/a:</b> {cuidador or '—'}", estilo_texto))
@@ -1793,7 +2017,6 @@ def generar_pdf_historico_general(desde, hasta):
         elements.append(Paragraph("<b>Pícnics pel dia següent:</b>", estilo_titulo))
         elements.append(Paragraph((temas or '—').replace("\n", "<br/>"), estilo_texto))
 
-        taxis_list = json.loads(taxis_json) if taxis_json else []
         if taxis_list:
             data = [["Data", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
 
@@ -1801,7 +2024,7 @@ def generar_pdf_historico_general(desde, hasta):
                 fecha_raw = t.get("Fecha", "")
                 try:
                     fecha_raw = datetime.strptime(fecha_raw, "%Y-%m-%d").strftime("%d/%m/%Y")
-                except:
+                except Exception:
                     pass
 
                 data.append([
@@ -1825,35 +2048,40 @@ def generar_pdf_historico_general(desde, hasta):
 
 
 # =====================================================
-#   HISTÒRIC TAXIS (PDF + DataFrame)
+#   HISTÒRIC TAXIS (PDF + DataFrame) – Dataverse
 # =====================================================
 
 def _recopilar_taxis_en_rang(desde, hasta):
     """
-    Retorna una llista de files amb tots els taxis en el rang de dates.
+    Retorna una llista de files amb tots els taxis en el rang de dates (Dataverse).
     Cada fila és [data_informe, data_servei, hora, recollida, destí, esportistes, observacions]
     """
-    c.execute("""
-        SELECT fecha, taxis
-        FROM informes
-        WHERE fecha BETWEEN ? AND ?
-        ORDER BY fecha ASC
-    """, (desde.strftime("%Y-%m-%d"), hasta.strftime("%Y-%m-%d")))
-    registros = c.fetchall()
+    desde_iso = desde.strftime("%Y-%m-%d")
+    hasta_iso = hasta.strftime("%Y-%m-%d")
+
+    try:
+        informes = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+    except Exception as e:
+        st.error(f"Error llegint informes generals per a taxis de Dataverse: {e}")
+        informes = []
 
     filas = []
 
-    for fecha_informe, taxis_json in registros:
-        taxis_list = json.loads(taxis_json) if taxis_json else []
-        if not taxis_list:
-            continue
+    for rec in informes:
+        fecha_informe_iso = rec.get("fecha") or ""
+        informe_id = rec.get("id")
 
-        # Data de l'informe (YYYY-MM-DD -> dd/mm/aaaa)
         try:
-            fecha_inf_dt = datetime.strptime(fecha_informe, "%Y-%m-%d")
+            taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
+        except Exception as e:
+            st.error(f"Error llegint taxis de Dataverse: {e}")
+            taxis_list = []
+
+        try:
+            fecha_inf_dt = datetime.strptime(fecha_informe_iso, "%Y-%m-%d")
             fecha_inf_str = fecha_inf_dt.strftime("%d/%m/%Y")
         except Exception:
-            fecha_inf_str = fecha_informe
+            fecha_inf_str = fecha_informe_iso
 
         for t in taxis_list:
             data_servei = t.get("Fecha", "") or ""
@@ -1952,8 +2180,7 @@ def obtener_historico_taxis_df(desde, hasta):
     df = pd.DataFrame(filas, columns=columnas)
     return df
 
-
-# app.py - Bloque 10
+# app_dataverse.py - Bloque 10
 # -----------------------
 # Lógica principal
 # -----------------------
@@ -1964,6 +2191,11 @@ def main():
     if "usuario_autenticado" not in st.session_state or not st.session_state["usuario_autenticado"]:
         login()
         return
+
+    # --- Càrrega d'esportistes des de Dataverse (una sola vegada per sessió) ---
+    if "alumnos_cargados" not in st.session_state:
+        cargar_alumnos_desde_dataverse()
+        st.session_state["alumnos_cargados"] = True
 
     # --- Barra lateral ---
     st.sidebar.markdown(f"👤 Usuari: **{st.session_state.get('usuario','').capitalize()}**")
@@ -2004,7 +2236,9 @@ def main():
         hasta = st.date_input("Fins a")
 
         st.divider()
-        st.subheader("🔐 Còpia de seguretat de la base de dades")
+        st.subheader("🔐 Còpia de seguretat de la base de dades antiga (SQLite)")
+
+        # Aquesta part només mostra el fitxer si existeix encara al servidor
         try:
             with open("informes.db", "rb") as f:
                 st.download_button(
@@ -2015,32 +2249,34 @@ def main():
                 )
         except FileNotFoundError:
             st.warning("No s'ha trobat el fitxer de base de dades 'informes.db'.")
-  
-        
+
         # ============================================================
-        # HISTÓRICO INDIVIDUAL
+        # HISTÓRICO INDIVIDUAL (ja usa Dataverse)
         # ============================================================
         if tipo == "Històric individual":
             alumno = st.selectbox("Seleccionar esportista", ALUMNOS)
             if st.button("📄 Generar històric individual"):
-                pdf = generar_pdf_historico_individual(alumno, desde, hasta)
-                if pdf:
-                    st.success(
-                        f"✅ Històric generat correctament "
-                        f"({desde.strftime('%d/%m/%Y')} - {hasta.strftime('%d/%m/%Y')})"
-                    )
-                    with open(pdf, "rb") as f:
-                        st.download_button(
-                            label="📥 Descarregar PDF",
-                            data=f,
-                            file_name=os.path.basename(pdf),
-                            mime="application/pdf"
-                        )
+                if not alumno:
+                    st.warning("Has de seleccionar un esportista.")
                 else:
-                    st.info("No hi ha informes en el rang seleccionat.")
+                    pdf = generar_pdf_historico_individual(alumno, desde, hasta)
+                    if pdf:
+                        st.success(
+                            f"✅ Històric generat correctament "
+                            f"({desde.strftime('%d/%m/%Y')} - {hasta.strftime('%d/%m/%Y')})"
+                        )
+                        with open(pdf, "rb") as f:
+                            st.download_button(
+                                label="📥 Descarregar PDF",
+                                data=f,
+                                file_name=os.path.basename(pdf),
+                                mime="application/pdf"
+                            )
+                    else:
+                        st.info("No hi ha informes en el rang seleccionat.")
 
         # ============================================================
-        # HISTÓRICO GENERAL
+        # HISTÓRICO GENERAL (ja usa Dataverse)
         # ============================================================
         elif tipo == "Històric general":
             if st.button("📄 Generar històric general"):
@@ -2061,7 +2297,7 @@ def main():
                     st.info("No hi ha informes generals en aquest rang.")
 
         # ============================================================
-        # HISTÓRICO TAXIS - PDF + EXCEL
+        # HISTÓRICO TAXIS - PDF + EXCEL (ja usa Dataverse)
         # ============================================================
         elif tipo == "Històric taxis":
             if st.button("🚕 Generar històric de taxis"):
@@ -2121,3 +2357,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
