@@ -1,6 +1,5 @@
-# app.py - Bloque 1
+# app_dataverse.py - Bloque 1
 import streamlit as st
-import sqlite3
 from datetime import date
 import pandas as pd
 import os
@@ -12,7 +11,7 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 import json
 import streamlit.components.v1 as components
-
+import hashlib
 
 # -----------------------
 # Configuración página
@@ -24,59 +23,19 @@ st.title("🏠 Gestió d'Informes - Residència Reina Sofia")
 PDFS_DIR = "pdfs"
 os.makedirs(PDFS_DIR, exist_ok=True)
 
-# app.py - Bloque 2
-
 # -----------------------
-# Conexión a la base de datos
-# -----------------------
-conn = sqlite3.connect("informes.db", check_same_thread=False)
-c = conn.cursor()
-
-# Tabla de informes generales
-c.execute('''CREATE TABLE IF NOT EXISTS informes (
-    fecha TEXT PRIMARY KEY,
-    cuidador TEXT,
-    entradas_salidas TEXT,
-    mantenimiento TEXT,
-    temas_genericos TEXT,
-    taxis TEXT
-)''')
-
-# Tabla de informes individuales
-c.execute('''CREATE TABLE IF NOT EXISTS informes_alumnos (
-    fecha TEXT,
-    alumno TEXT,
-    contenido TEXT,
-    PRIMARY KEY (fecha, alumno)
-)''')
-
-conn.commit()
-
-# -----------------------
-# Listas de cuidadores y alumnos
+# Listas de cuidadores
 # -----------------------
 CUIDADORES = ["", "Israel Pampin", "Marta Oliver", "Eva Milán"]
 
-ALUMNOS = [
-    "Adrian Rebollo Bonet","Aina Colomar Carreras","Aina Comas Casasnovas","Aina Real Cerdá",
-    "Albert Gomis Amengual","Aleix Bosch Alles","Alma Dalmau Silgado","Ania Cristina Buciu Bologa",
-    "Anna Pelletey Marí","Berta Sans Salord","Clara Comas Casasnovas","Cristina Vicente Tercero",
-    "Emily Czaja","Iago Parada Llompart","Jaume Coll Vilanova","Jimena Pons Abad",
-    "Joan Cortés Rubio","Joan Morlà Mas","Josep Tur Prats","Júlia Caldentey López",
-    "Marc Arias Álvarez","Maria Gornés Rodríguez","Miquel Angel Vicens Candentey","Miquel Morlà Mas",
-    "Mireia Perelló Alcover","Orion Leon Rennicke","Pablo Velasco Ortiz","Paula Sans Cantallops",
-    "Pere Andreu Martínez","Romina Camarillo Alarcón","Santiago Mesa Godoy","Sara Verbeek Alvarez",
-    "Soy Tony Theunisse","Tiago del Po Vica","Tomeu Umbert Sureda","Toni Febrer Sintes",
-    "Victor Adda Ferrer","Xabier Fenández Cebey","Xavier Capllonch Salas","Matias Acosta Suarez"
-]
-
 # -----------------------
-# Alias d'esportistes (sense duplicats)
+# Alias de esportistes (des de Dataverse)
 # -----------------------
 
-def generar_alias_base(nombre_completo: str) -> str:
+def generar_alias(nombre_completo: str) -> str:
     """
-    Genera un alias base tipo @nombreInicialApellido a partir del nombre completo.
+    Genera un alias tipo @nombreInicialApellido a partir del nombre completo.
+    Se usa solo como respaldo si en Dataverse no hay alias.
     Ejemplo: 'Aina Real Cerdá' -> '@ainaR'
     """
     partes = nombre_completo.split()
@@ -91,88 +50,79 @@ def generar_alias_base(nombre_completo: str) -> str:
     else:
         return f"@{nombre}"
 
-
-def generar_alias_resuelto(nombre_completo: str, existentes: set) -> str:
-    """
-    Genera un alias evitando duplicados.
-    - Primero usa @nombre + inicial 1er apellido.
-    - Si ya existe y hay 2º apellido, usa @nombre + inicial 1er + inicial 2º apellido.
-    - Si aun así existe, añade sufijos numéricos: @nombrex2, @nombrex3, ...
-    """
-    partes = nombre_completo.split()
-    if not partes:
-        return ""
-
-    nombre = partes[0].lower()
-    alias_base = generar_alias_base(nombre_completo)
-
-    # 1) Alias base
-    if alias_base not in existentes:
-        return alias_base
-
-    # 2) Dos iniciales de apellidos
-    if len(partes) > 2:
-        alias_dos_apellidos = f"@{nombre}{partes[1][0].lower()}{partes[2][0].lower()}"
-        if alias_dos_apellidos not in existentes:
-            return alias_dos_apellidos
-
-    # 3) Sufijos numéricos
-    sufijo = 2
-    while True:
-        candidato = f"{alias_base}{sufijo}"
-        if candidato not in existentes:
-            return candidato
-        sufijo += 1
-
-
-# Diccionario global de alias por deportista (sin duplicados)
+# Variables globales (se rellenan desde Dataverse)
+ALUMNOS = []
 ALIAS_DEPORTISTAS = {}
-_alias_usados = set()
 
-for alumno in ALUMNOS:
-    alias = generar_alias_resuelto(alumno, _alias_usados)
-    ALIAS_DEPORTISTAS[alumno] = alias
-    _alias_usados.add(alias)
+def cargar_alumnos_desde_dataverse():
+    """
+    Carga la lista de alumnos y sus alias desde Dataverse.
+    No deja ningún nombre real en el código fuente.
+    """
+    global ALUMNOS, ALIAS_DEPORTISTAS
 
-# -----------------------
-# Tabla de usuarios (para contraseñas actualizadas)
-# -----------------------
-c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-    usuario TEXT PRIMARY KEY,
-    password_hash TEXT
-)''')
-conn.commit()
+    try:
+        alumnos = DV.get_alumnos()  # DV se define en el Bloque 2
+    except Exception as e:
+        st.error(f"No s'han pogut carregar els esportistes des de Dataverse: {e}")
+        alumnos = []
 
-import hashlib
+    nombres = []
+    alias_dict = {}
+
+    for a in alumnos:
+        nombre = a.get("nombre", "").strip()
+        alias = (a.get("alias") or "").strip()
+        if not nombre:
+            continue
+        # Si en Dataverse no hay alias, generamos uno de respaldo
+        if not alias:
+            alias = generar_alias(nombre)
+        nombres.append(nombre)
+        alias_dict[nombre] = alias
+
+    ALUMNOS = nombres
+    ALIAS_DEPORTISTAS = alias_dict
 
 # -----------------------
 # 🔐 LOGIN DE TUTORES
 # -----------------------
 
-def obtener_usuarios():
-    """Combina usuarios de secrets y los de la base de datos (prioriza los de la BD)."""
-    usuarios = {}
-    # Cargar primero desde secrets.toml
+def verificar_login(usuario: str, password: str) -> bool:
+    """
+    Comprueba si el usuario existe y la contraseña coincide.
+    Prioridad:
+      1) Contraseñas definidas en st.secrets["auth"] (hash calculado al vuelo)
+      2) Contraseña actualizada en Dataverse (tabla usuaris aplicació informes)
+    """
+    # Hash de la contraseña introducida
+    hash_pw = hashlib.sha256(password.encode()).hexdigest()
+
+    # 1) Usuarios base desde secrets.toml ([auth])
+    base_hashes = {}
     try:
-        base = {u: hashlib.sha256(p.encode()).hexdigest() for u, p in st.secrets["auth"].items()}
-        usuarios.update(base)
+        for u, p in st.secrets["auth"].items():
+            base_hashes[u] = hashlib.sha256(p.encode()).hexdigest()
     except Exception:
-        st.error("⚠️ No s'han trobat credencials a .streamlit/secrets.toml (secció [auth])")
+        # Si no hay sección [auth], simplemente no usamos credenciales base
+        pass
 
-    # Sobrescribir si existen usuarios actualizados en la BD
-    c.execute("SELECT usuario, password_hash FROM usuarios")
-    for u, p in c.fetchall():
-        usuarios[u] = p
+    # Comprobar primero contra secrets
+    if usuario in base_hashes and base_hashes[usuario] == hash_pw:
+        return True
 
-    return usuarios
+    # 2) Comprobar si hay contraseña actualizada en Dataverse
+    try:
+        stored_hash = DV.get_usuario_hash(usuario)
+    except Exception as e:
+        st.error(f"Error accedint a usuaris de Dataverse: {e}")
+        stored_hash = None
 
-def verificar_login(usuario, password):
-    """Comprueba si el usuario existe y la contraseña coincide."""
-    usuarios = obtener_usuarios()
-    if usuario in usuarios:
-        hash_pw = hashlib.sha256(password.encode()).hexdigest()
-        return usuarios[usuario] == hash_pw
+    if stored_hash and stored_hash == hash_pw:
+        return True
+
     return False
+
 
 def login():
     """Pantalla d'inici de sessió."""
@@ -191,14 +141,16 @@ def login():
         else:
             st.error("Usuari o contrasenya incorrectes.")
 
+
 def logout():
     """Tanca la sessió."""
     st.session_state["usuario_autenticado"] = False
     st.session_state.pop("usuario", None)
     st.rerun()
 
+
 def cambiar_contraseña():
-    """Formulari per canviar la contrasenya de l'usuari actual."""
+    """Formulari per canviar la contrasenya de l'usuari actual (guardada a Dataverse)."""
     st.header("🔑 Canviar contrasenya")
 
     usuario = st.session_state.get("usuario", None)
@@ -212,7 +164,7 @@ def cambiar_contraseña():
     pw_nueva = st.text_input("Nova contrasenya", type="password")
     pw_confirm = st.text_input("Confirmar nova contrasenya", type="password")
 
-    if st.button("Desar nova contrasenya", key="guardar_nueva_contraseña"):
+    if st.button("Desar nova contrasenya", key="guardar_nova_contrasenya"):
         # Verificar contraseña actual
         if not verificar_login(usuario, pw_actual):
             st.error("❌ La contrasenya actual no és correcta.")
@@ -223,13 +175,13 @@ def cambiar_contraseña():
             st.warning("⚠️ Les contrasenyes noves no coincideixen.")
             return
 
-        # Guardar hash nuevo en la base de datos
+        # Guardar hash nuevo en Dataverse
         hash_nuevo = hashlib.sha256(pw_nueva.encode()).hexdigest()
-        c.execute(
-            "INSERT OR REPLACE INTO usuarios (usuario, password_hash) VALUES (?, ?)",
-            (usuario, hash_nuevo)
-        )
-        conn.commit()
+        try:
+            DV.set_usuario_hash(usuario, hash_nuevo)
+        except Exception as e:
+            st.error(f"No s'ha pogut actualitzar la contrasenya a Dataverse: {e}")
+            return
 
         st.success("✅ Contrasenya actualitzada correctament.")
         st.info("Tornant al menú principal...")
@@ -245,7 +197,358 @@ def cambiar_contraseña():
         st.session_state["vista_actual"] = "menu"
         st.rerun()
 
+# app_dataverse.py - Bloque 2
+import requests
+import json
+from datetime import datetime
 
+# -----------------------
+# Configuración Dataverse
+# -----------------------
+DV_CFG = st.secrets["dataverse"]
+
+TENANT_ID = DV_CFG["tenant_id"]
+CLIENT_ID = DV_CFG["client_id"]
+CLIENT_SECRET = DV_CFG["client_secret"]
+
+RESOURCE = DV_CFG["resource"]
+API_BASE = DV_CFG["api_base"]
+
+ENTITY_INFORMES = DV_CFG["informes_entity_set"]          # p.ej. "cr143_informegenerals"
+ENTITY_TAXIS = DV_CFG["taxis_entity_set"]                # p.ej. "cr143_taxis"
+ENTITY_INDIV = DV_CFG["informes_ind_entity_set"]         # p.ej. "cr143_informeindividuals"
+ENTITY_USUARIOS = DV_CFG["usuarios_entity_set"]          # p.ej. "cr143_usuariaplicacios"
+ENTITY_ALUMNOS = DV_CFG["alumnos_entity_set"]            # p.ej. "cr143_esportistas"
+
+
+class DataverseClient:
+    def __init__(self):
+        self._token = None
+
+    # ----------------------------------------------
+    # Autenticación OAuth2 client_credentials
+    # ----------------------------------------------
+    def _get_token(self):
+        if self._token:
+            return self._token
+
+        url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+        data = {
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "scope": f"{RESOURCE}/.default",
+            "grant_type": "client_credentials",
+        }
+
+        resp = requests.post(url, data=data)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Error obtenint token OAuth: {resp.status_code} - {resp.text}")
+
+        self._token = resp.json()["access_token"]
+        return self._token
+
+    def _headers(self):
+        return {
+            "Authorization": f"Bearer {self._get_token()}",
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json",
+            "OData-MaxVersion": "4.0",
+            "OData-Version": "4.0",
+        }
+
+    # ----------------------------------------------
+    # Helpers HTTP
+    # ----------------------------------------------
+    def get(self, endpoint: str, params: dict | None = None):
+        r = requests.get(f"{API_BASE}/{endpoint}", headers=self._headers(), params=params)
+        if r.status_code not in (200, 204):
+            raise RuntimeError(f"GET {endpoint} → {r.status_code}: {r.text}")
+        if not r.text:
+            return None
+        return r.json()
+
+    def post(self, endpoint: str, payload: dict):
+        r = requests.post(f"{API_BASE}/{endpoint}", headers=self._headers(), data=json.dumps(payload))
+        if r.status_code not in (200, 201, 204):
+            raise RuntimeError(f"POST {endpoint} → {r.status_code}: {r.text}")
+        return r
+
+    def patch(self, endpoint: str, payload: dict):
+        r = requests.patch(f"{API_BASE}/{endpoint}", headers=self._headers(), data=json.dumps(payload))
+        if r.status_code not in (200, 204):
+            raise RuntimeError(f"PATCH {endpoint} → {r.status_code}: {r.text}")
+        return r
+
+    def delete(self, endpoint: str):
+        r = requests.delete(f"{API_BASE}/{endpoint}", headers=self._headers())
+        if r.status_code not in (200, 204):
+            raise RuntimeError(f"DELETE {endpoint} → {r.status_code}: {r.text}")
+        return r
+
+    # =========================================================
+    # 🔶 USUARIOS (login) – tabla cr143_usuariaplicacio
+    # =========================================================
+    def get_usuario_hash(self, usuario: str) -> str | None:
+        """
+        Devuelve el hash de contraseña almacenado en Dataverse para un usuario.
+        Usa la columna cr143_nomusuari y cr143_passwordhash.
+        """
+        # Escapar comillas simples para OData
+        usuario_esc = usuario.replace("'", "''")
+        filtro = f"cr143_nomusuari eq '{usuario_esc}'"
+        endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
+        data = self.get(endpoint)
+        if not data or not data.get("value"):
+            return None
+        return data["value"][0].get("cr143_passwordhash")
+
+    def set_usuario_hash(self, usuario: str, password_hash: str):
+        """
+        Crea o actualiza el hash de contraseña de un usuario en Dataverse.
+        """
+        usuario_esc = usuario.replace("'", "''")
+        filtro = f"cr143_nomusuari eq '{usuario_esc}'"
+        endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
+        data = self.get(endpoint)
+        payload = {
+            "cr143_nomusuari": usuario,
+            "cr143_passwordhash": password_hash,
+        }
+
+        if data and data.get("value"):
+            # Update (PATCH)
+            rec_id = data["value"][0]["cr143_usuariaplicacioid"]
+            self.patch(f"{ENTITY_USUARIOS}({rec_id})", payload)
+        else:
+            # Create (POST)
+            self.post(ENTITY_USUARIOS, payload)
+
+    # =========================================================
+    # 🔶 INFORME GENERAL – tabla cr143_informegeneral
+    # =========================================================
+    def get_informe_general(self, fecha_iso: str) -> dict | None:
+        """
+        Devuelve el informe general de una fecha (YYYY-MM-DD) o None.
+        Usa la columna cr143_codigofecha per filtrar.
+        """
+        fecha_esc = fecha_iso.replace("'", "''")
+        filtro = f"cr143_codigofecha eq '{fecha_esc}'"
+        endpoint = f"{ENTITY_INFORMES}?$filter={filtro}"
+        data = self.get(endpoint)
+        if not data or not data.get("value"):
+            return None
+        rec = data["value"][0]
+        return {
+            "id": rec.get("cr143_informegeneralid"),
+            "cuidador": rec.get("cr143_cuidador") or "",
+            "entradas": rec.get("cr143_informedeldia") or "",
+            "mantenimiento": rec.get("cr143_notesdireccio") or "",
+            "temas": rec.get("cr143_picnics") or "",
+        }
+
+    def upsert_informe_general(self, fecha_iso: str, cuidador: str,
+                               entradas: str, mantenimiento: str, temas: str) -> str | None:
+        """
+        Crea o actualiza el informe general de una fecha.
+        Devuelve el GUID del informe.
+        """
+        existente = self.get_informe_general(fecha_iso)
+
+        # Fecha en formato date-only
+        fecha_date = datetime.strptime(fecha_iso, "%Y-%m-%d").date().isoformat()
+
+        payload = {
+            "cr143_fechainforme": fecha_date,
+            "cr143_codigofecha": fecha_iso,
+            "cr143_cuidador": cuidador or "",
+            "cr143_informedeldia": entradas or "",
+            "cr143_notesdireccio": mantenimiento or "",
+            "cr143_picnics": temas or "",
+        }
+
+        if existente and existente.get("id"):
+            rec_id = existente["id"]
+            self.patch(f"{ENTITY_INFORMES}({rec_id})", payload)
+            return rec_id
+        else:
+            r = self.post(ENTITY_INFORMES, payload)
+            location = r.headers.get("OData-EntityId") or r.headers.get("Location")
+            if location and "(" in location and ")" in location:
+                return location.split("(")[1].split(")")[0]
+            return None
+
+    # =========================================================
+    # 🔶 TAXIS – tabla cr143_taxi
+    # =========================================================
+    def get_taxis_by_informe(self, informe_id: str) -> list[dict]:
+        """
+        Devuelve la lista de taxis asociados a un informe general (GUID).
+        Filtra por _cr143_informegeneral_value.
+        """
+        if not informe_id:
+            return []
+
+        filtro = f"_cr143_informegeneral_value eq {informe_id}"
+        endpoint = f"{ENTITY_TAXIS}?$filter={filtro}"
+        data = self.get(endpoint)
+        rows = data.get("value", []) if data else []
+
+        taxis = []
+        for rec in rows:
+            fecha_raw = rec.get("cr143_fecha")
+            fecha_txt = ""
+            if fecha_raw:
+                try:
+                    fecha_txt = datetime.fromisoformat(fecha_raw).date().strftime("%Y-%m-%d")
+                except Exception:
+                    fecha_txt = ""
+            taxis.append({
+                "Fecha": fecha_txt,
+                "Hora": rec.get("cr143_hora") or "",
+                "Recogida": rec.get("cr143_recollida") or "",
+                "Destino": rec.get("cr143_desti") or "",
+                "Deportistas": rec.get("cr143_esportistes") or "",
+                "Observaciones": rec.get("cr143_observacions") or "",
+            })
+        return taxis
+
+    def replace_taxis_for_informe(self, informe_id: str, fecha_iso: str, taxis_list: list[dict]):
+        """
+        Borra todos los taxis asociados a ese informe y crea los nuevos de taxis_list.
+        """
+        if not informe_id:
+            return
+
+        # 1) Leer taxis actuales
+        filtro = f"_cr143_informegeneral_value eq {informe_id}"
+        endpoint = f"{ENTITY_TAXIS}?$filter={filtro}"
+        data = self.get(endpoint)
+        rows = data.get("value", []) if data else []
+
+        # 2) Borrar taxis actuales
+        for rec in rows:
+            taxi_id = rec["cr143_taxiid"]
+            self.delete(f"{ENTITY_TAXIS}({taxi_id})")
+
+        # 3) Crear nuevos taxis
+        for t in taxis_list:
+            fecha_txt = t.get("Fecha") or fecha_iso
+            try:
+                fecha_iso_real = datetime.strptime(fecha_txt, "%Y-%m-%d").date().isoformat()
+            except Exception:
+                fecha_iso_real = datetime.strptime(fecha_iso, "%Y-%m-%d").date().isoformat()
+
+            payload = {
+                "cr143_fecha": fecha_iso_real,
+                "cr143_hora": t.get("Hora", "") or "",
+                "cr143_recollida": t.get("Recogida", "") or "",
+                "cr143_desti": t.get("Destino", "") or "",
+                "cr143_esportistes": t.get("Deportistas", "") or "",
+                "cr143_observacions": t.get("Observaciones", "") or "",
+                # Lookup al informe general (nom de navegació habitual):
+                "cr143_Informegeneral@odata.bind": f"/{ENTITY_INFORMES}({informe_id})",
+            }
+            self.post(ENTITY_TAXIS, payload)
+
+    # =========================================================
+    # 🔶 INFORMES INDIVIDUALS – tabla cr143_informeindividual
+    # =========================================================
+    def get_informe_individual(self, fecha_iso: str, alumno: str) -> dict | None:
+        """
+        Devuelve el informe individual (fecha, alumno) o None.
+        Usa cr143_codigofecha + cr143_alumne.
+        """
+        fecha_esc = fecha_iso.replace("'", "''")
+        alumno_esc = alumno.replace("'", "''")
+        filtro = f"cr143_codigofecha eq '{fecha_esc}' and cr143_alumne eq '{alumno_esc}'"
+        endpoint = f"{ENTITY_INDIV}?$filter={filtro}"
+        data = self.get(endpoint)
+        if not data or not data.get("value"):
+            return None
+        rec = data["value"][0]
+        return {
+            "id": rec.get("cr143_informeindividualid"),
+            "contenido": rec.get("cr143_contingut") or "",
+        }
+
+    def upsert_informe_individual(self, fecha_iso: str, alumno: str,
+                                  alias: str, contenido: str) -> str | None:
+        """
+        Crea o actualiza un informe individual (fecha, alumno).
+        """
+        existente = self.get_informe_individual(fecha_iso, alumno)
+
+        fecha_date = datetime.strptime(fecha_iso, "%Y-%m-%d").date().isoformat()
+        payload = {
+            "cr143_fechainforme": fecha_date,
+            "cr143_codigofecha": fecha_iso,
+            "cr143_alumne": alumno,
+            "cr143_alias": alias or "",
+            "cr143_contingut": contenido or "",
+        }
+
+        if existente and existente.get("id"):
+            rec_id = existente["id"]
+            self.patch(f"{ENTITY_INDIV}({rec_id})", payload)
+            return rec_id
+        else:
+            r = self.post(ENTITY_INDIV, payload)
+            location = r.headers.get("OData-EntityId") or r.headers.get("Location")
+            if location and "(" in location and ")" in location:
+                return location.split("(")[1].split(")")[0]
+            return None
+
+    def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, str]]:
+        """
+        Devuelve lista de (fecha_iso, contenido) ordenada desc para un alumno.
+        """
+        alumno_esc = alumno.replace("'", "''")
+        filtro = f"cr143_alumne eq '{alumno_esc}'"
+        endpoint = f"{ENTITY_INDIV}?$filter={filtro}&$orderby=cr143_fechainforme desc"
+        data = self.get(endpoint)
+        rows = data.get("value", []) if data else []
+
+        res = []
+        for rec in rows:
+            fecha_raw = rec.get("cr143_fechainforme")
+            fecha_iso = ""
+            if fecha_raw:
+                try:
+                    fecha_iso = datetime.fromisoformat(fecha_raw).date().strftime("%Y-%m-%d")
+                except Exception:
+                    fecha_iso = ""
+            res.append((fecha_iso, rec.get("cr143_contingut") or ""))
+        return res
+
+    # =========================================================
+    # 🔶 ALUMNOS – tabla cr143_esportista (Esportistes residència)
+    # =========================================================
+    def get_alumnos(self) -> list[dict]:
+        """
+        Devuelve una lista de dict:
+        [{ "nombre": <nom complet>, "alias": <alias> }, ...]
+        usando la tabla 'Esportistes residència'.
+        """
+        data = self.get(ENTITY_ALUMNOS)
+        if not data or "value" not in data:
+            return []
+
+        res = []
+        for rec in data["value"]:
+            # Nom complet = columna primària de la taula personalitzada:
+            # habitualment <schema_name> + "name" → cr143_esportistaname
+            nombre = rec.get("cr143_esportistaname") or ""
+            alias = rec.get("cr143_alias") or ""
+            nombre = nombre.strip()
+            alias = alias.strip()
+            if not nombre:
+                continue
+            res.append({"nombre": nombre, "alias": alias})
+        return res
+
+
+# Instancia global del cliente Dataverse
+DV = DataverseClient()
 
 # app.py - Bloque 3
 
