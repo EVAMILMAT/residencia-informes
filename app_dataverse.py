@@ -79,7 +79,8 @@ ENTITY_TAXIS = DV_CFG["taxis_entity_set"]                # p.ej. "cr143_taxis"
 ENTITY_INDIV = DV_CFG["informes_ind_entity_set"]         # p.ej. "cr143_informeindividuals"
 ENTITY_USUARIOS = DV_CFG["usuarios_entity_set"]          # p.ej. "cr143_usuariaplicacios"
 ENTITY_ALUMNOS = DV_CFG["alumnos_entity_set"]            # p.ej. "cr143_esportistas"
-
+ALUMNOS_NAME_FIELD = "cr143_nomcomplet"   # normalment és el nom primari
+ALUMNOS_ALIAS_FIELD = "cr143_alias"           # CAMBIA ESTO si tu columna alias se llama distinto
 
 class DataverseClient:
     def __init__(self):
