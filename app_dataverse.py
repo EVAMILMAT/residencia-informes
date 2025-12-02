@@ -530,6 +530,29 @@ class DataverseClient:
 
 # Instancia global del cliente Dataverse
 DV = DataverseClient()
+# =========================================================
+# Funcions cachejades per reduir crides a Dataverse
+# =========================================================
+
+@st.cache_data(ttl=300)  # 5 minuts
+def dv_get_alumnos_cached():
+    return DV.get_alumnos()
+
+@st.cache_data(ttl=120)  # 2 minuts
+def dv_get_informes_generales_todos_cached():
+    return DV.get_informes_generales_todos()
+
+@st.cache_data(ttl=120)  # 2 minuts
+def dv_get_informes_generales_rango_cached(desde_iso: str, hasta_iso: str):
+    return DV.get_informes_generales_rango(desde_iso, hasta_iso)
+
+@st.cache_data(ttl=120)  # 2 minuts
+def dv_get_informes_individuales_por_alumno_cached(alumno: str):
+    return DV.get_informes_individuales_por_alumno(alumno)
+
+@st.cache_data(ttl=120)  # 2 minuts
+def dv_get_taxis_by_informe_cached(informe_id: str):
+    return DV.get_taxis_by_informe(informe_id)
 
 
 # -----------------------
@@ -543,7 +566,8 @@ def cargar_alumnos_desde_dataverse():
     global ALUMNOS, ALIAS_DEPORTISTAS
 
     try:
-        alumnos = DV.get_alumnos()
+        alumnos = dv_get_alumnos_cached()
+
     except Exception as e:
         st.error(f"No s'han pogut carregar els esportistes des de Dataverse: {e}")
         alumnos = []
@@ -1635,9 +1659,12 @@ def consultar_informe_individual():
     # 1) INFORMES INDIVIDUALS (Dataverse)
     # -------------------------------------------------
     if tipo == "Informes individuals":
-        try:
+        
             # Llista de (fecha_iso, contenido) ordenada desc
-            registros = DV.get_informes_individuales_por_alumno(alumno)
+        try:
+            registros = dv_get_informes_individuales_por_alumno_cached(alumno)
+
+       
         except Exception as e:
             st.error(f"Error llegint informes individuals de Dataverse: {e}")
             registros = []
@@ -1666,7 +1693,8 @@ def consultar_informe_individual():
     # -------------------------------------------------
     else:
         try:
-            informes = DV.get_informes_generales_todos()
+           informes = dv_get_informes_generales_todos_cached()
+
         except Exception as e:
             st.error(f"Error llegint informes generals de Dataverse: {e}")
             informes = []
@@ -1865,7 +1893,7 @@ def generar_pdf_historico_individual(alumno, desde, hasta):
 
     # Informes individuals (Dataverse)
     try:
-        todos_ind = DV.get_informes_individuales_por_alumno(alumno)
+          todos_ind = dv_get_informes_individuales_por_alumno_cached(alumno)
     except Exception as e:
         st.error(f"Error llegint informes individuals de Dataverse: {e}")
         todos_ind = []
@@ -1879,7 +1907,7 @@ def generar_pdf_historico_individual(alumno, desde, hasta):
 
     # Mencions generals (Dataverse)
     try:
-        informes_gen = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+        informes_gen = dv_get_informes_generales_rango_cached(desde_iso, hasta_iso)
     except Exception as e:
         st.error(f"Error llegint informes generals de Dataverse: {e}")
         informes_gen = []
@@ -1984,7 +2012,7 @@ def generar_pdf_historico_general(desde, hasta):
     estilo_texto = ParagraphStyle(name="Texto", fontName="Helvetica", fontSize=10, leading=14)
 
     try:
-        registros = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+        registros = dv_get_informes_generales_rango_cached(desde_iso, hasta_iso)
     except Exception as e:
         st.error(f"Error llegint informes generals de Dataverse: {e}")
         registros = []
@@ -2011,7 +2039,8 @@ def generar_pdf_historico_general(desde, hasta):
         informe_id = rec.get("id")
 
         try:
-            taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
+            taxis_list = dv_get_taxis_by_informe_cached(informe_id) if informe_id else []
+
         except Exception as e:
             st.error(f"Error llegint taxis de Dataverse: {e}")
             taxis_list = []
@@ -2077,7 +2106,8 @@ def _recopilar_taxis_en_rang(desde, hasta):
     hasta_iso = hasta.strftime("%Y-%m-%d")
 
     try:
-        informes = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+        informes = dv_get_informes_generales_rango_cached(desde_iso, hasta_iso)
+
     except Exception as e:
         st.error(f"Error llegint informes generals per a taxis de Dataverse: {e}")
         informes = []
@@ -2209,8 +2239,11 @@ def main():
         login()
         return
 
-    # --- Càrrega d'esportistes des de Dataverse (sempre actualitzat) ---
-    cargar_alumnos_desde_dataverse()
+    # --- Càrrega d'esportistes des de Dataverse (una vegada per sessió) ---
+    if "alumnos_cargados" not in st.session_state:
+        cargar_alumnos_desde_dataverse()
+        st.session_state["alumnos_cargados"] = True
+
 
     # --- Barra lateral ---
     st.sidebar.markdown(f"👤 Usuari: **{st.session_state.get('usuario','').capitalize()}**")
