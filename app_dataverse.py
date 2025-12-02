@@ -530,6 +530,17 @@ class DataverseClient:
 
 # Instancia global del cliente Dataverse
 DV = DataverseClient()
+
+# -------------------------------------------------
+# Compatibilitat amb codi antic: dv_get_alumnos()
+# -------------------------------------------------
+def dv_get_alumnos():
+    """
+    Funció de compatibilitat. Si algun tros antic del codi
+    encara crida dv_get_alumnos(), delegam a DV.get_alumnos().
+    """
+    return DV.get_alumnos()
+
 # =========================================================
 # Funcions cachejades per reduir crides a Dataverse
 # =========================================================
