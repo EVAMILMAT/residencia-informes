@@ -534,9 +534,9 @@ DV = DataverseClient()
 # Funcions cachejades per reduir crides a Dataverse
 # =========================================================
 
-@st.cache_data(ttl=300)  # 5 minuts
-def dv_get_alumnos_cached():
-    return DV.get_alumnos()
+# @st.cache_data(ttl=300)  # 5 minuts
+# def dv_get_alumnos_cached():
+#    return DV.get_alumnos()
 
 @st.cache_data(ttl=120)  # 2 minuts
 def dv_get_informes_generales_todos_cached():
@@ -566,7 +566,7 @@ def cargar_alumnos_desde_dataverse():
     global ALUMNOS, ALIAS_DEPORTISTAS
 
     try:
-        alumnos = dv_get_alumnos_cached()
+        alumnos = dv_get_alumnos()
 
     except Exception as e:
         st.error(f"No s'han pogut carregar els esportistes des de Dataverse: {e}")
