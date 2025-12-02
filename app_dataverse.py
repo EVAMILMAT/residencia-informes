@@ -1231,6 +1231,10 @@ def formulario_informe_general():
 
     info = st.session_state["informe_general"]
     bloqueado = st.session_state["bloqueado"]
+   
+    # --- Assegurar que els alumnes estan carregats ---
+    if not ALUMNOS:
+        cargar_alumnos_desde_dataverse()
 
     # --- Àlies d'esportistes (no toca l'estat del formulari) ---
     with st.expander("👀 Consultar àlies d'esportistes (@)", expanded=False):
