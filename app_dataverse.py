@@ -2253,7 +2253,7 @@ def main():
     elif vista == "cambiar_contraseña":
         cambiar_contraseña()
 
-    elif vista == "historico":
+       elif vista == "historico":
         st.header("🖨️ Imprimir històric d'informes")
         tipo = st.radio(
             "Seleccionar tipus d'històric",
@@ -2263,19 +2263,6 @@ def main():
         hasta = st.date_input("Fins a")
 
         st.divider()
-        st.subheader("🔐 Còpia de seguretat de la base de dades antiga (SQLite)")
-
-        # Aquesta part només mostra el fitxer si existeix encara al servidor
-        try:
-            with open("informes.db", "rb") as f:
-                st.download_button(
-                    label="📥 Descarregar còpia de 'informes.db'",
-                    data=f,
-                    file_name="informes_backup.db",
-                    mime="application/octet-stream"
-                )
-        except FileNotFoundError:
-            st.warning("No s'ha trobat el fitxer de base de dades 'informes.db'.")
 
         # ============================================================
         # HISTÓRICO INDIVIDUAL (ja usa Dataverse)
@@ -2380,6 +2367,7 @@ def main():
         if st.button("🏠 Tornar al menú"):
             st.session_state["vista_actual"] = "menu"
             st.rerun()
+
 
 
 if __name__ == "__main__":
