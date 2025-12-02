@@ -1196,9 +1196,19 @@ def comprobar_sobrescribir_individual(fecha_iso: str, alumno: str) -> bool:
 def formulario_informe_general():
     st.header("🗓️ Introduir informe general")
 
-    # Usuari actual (login) i nom de cuidador associat
-    usuario_actual = st.session_state.get("usuario", "") or ""
-    cuidador_sessio = MAPA_USUARIO_A_CUIDADOR.get(usuario_actual, "")
+    # --- Determinar cuidador a partir de l'usuari autenticat ---
+    usuario_actual = st.session_state.get("usuario", "").strip()
+    if not usuario_actual:
+        st.error("No s'ha pogut determinar l'usuari actual. Torna a iniciar sessió.")
+        return
+
+    # En aquesta versió, el nom de cuidador és el mateix que l'usuari
+    cuidador_actual = usuario_actual
+
+    # --- Assegurar que els esportistes estiguin carregats (per si falla en main) ---
+    global ALUMNOS, ALIAS_DEPORTISTAS
+    if not ALUMNOS:
+        cargar_alumnos_desde_dataverse()
 
     # --- Estat inicial ---
     if "informe_general" not in st.session_state:
@@ -1242,6 +1252,8 @@ def formulario_informe_general():
         if informe:
             # Hi ha informe a Dataverse → omplim i bloquejam
             st.session_state["informe_general"] = {
+                # Encara que a Dataverse hi hagi un altre valor,
+                # per aquesta sessió el cuidador serà l'usuari actual:
                 "cuidador": informe.get("cuidador", "") or "",
                 "entradas": informe.get("entradas", "") or "",
                 "mantenimiento": informe.get("mantenimiento", "") or "",
@@ -1289,6 +1301,11 @@ def formulario_informe_general():
     # --- Àlies d'esportistes (no toca l'estat del formulari) ---
     with st.expander("👀 Consultar àlies d'esportistes (@)", expanded=False):
         st.caption("Fes servir aquests àlies al text: @ainaR, @marcA…")
+
+        # Per si ALUMNOS segueix buit per algun motiu, tornam a intentar carregar
+        if not ALUMNOS:
+            cargar_alumnos_desde_dataverse()
+
         df_alias = pd.DataFrame(
             [{"Esportista": n, "Àlies": ALIAS_DEPORTISTAS.get(n, "")} for n in ALUMNOS]
         )
@@ -1305,17 +1322,9 @@ def formulario_informe_general():
     with st.form("form_informe_general", clear_on_submit=False):
         disabled = bloqueado
 
-        # --------------------------
-        # Cuidador/a fix segons sessió
-        # --------------------------
-        if disabled:
-            # Informe bloquejat: mostram el cuidador que hi ha guardat
-            cuidador_sel = info.get("cuidador", "") or ""
-            st.markdown(f"**Cuidador/a (informació guardada):** {cuidador_sel or '—'}")
-        else:
-            # Informe editable: el cuidador es fixa al de la sessió
-            cuidador_sel = cuidador_sessio
-            st.markdown(f"**Cuidador/a:** {cuidador_sel or '—'}")
+        # Cuidador: fixat per la sessió, no editable
+        st.markdown(f"**Cuidador/a (sessió actual):** `{cuidador_actual}`")
+        cuidador_sel = cuidador_actual
 
         entradas_txt = st.text_area(
             "Informe del dia",
@@ -1409,8 +1418,7 @@ def formulario_informe_general():
     # --- Desar a Dataverse ---
     if submitted_enviar or submitted_sense_enviar:
         if not cuidador_sel:
-            st.warning("⚠️ No s'ha pogut determinar el cuidador per aquesta sessió. "
-                       "Revisa la configuració de la taula d'usuaris a Dataverse.")
+            st.warning("⚠️ No s'ha pogut determinar el cuidador per aquesta sessió.")
             return
 
         info["cuidador"] = cuidador_sel
@@ -1486,7 +1494,6 @@ def formulario_informe_general():
                 st.session_state["fecha_cargada"] = None
                 st.session_state["vista_actual"] = "menu"
                 st.rerun()
-
 
         
 # app_dataverse.py – Bloque 8
