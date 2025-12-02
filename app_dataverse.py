@@ -535,7 +535,7 @@ DV = DataverseClient()
 # =========================================================
 
 # @st.cache_data(ttl=300)  # 5 minuts
-# def dv_get_alumnos_cached():
+# def _cached():
 #    return DV.get_alumnos()
 
 @st.cache_data(ttl=120)  # 2 minuts
@@ -559,15 +559,10 @@ def dv_get_taxis_by_informe_cached(informe_id: str):
 # Carga de alumnos desde Dataverse
 # -----------------------
 def cargar_alumnos_desde_dataverse():
-    """
-    Carga la lista de alumnos y sus alias desde Dataverse
-    y la deja en las variables globales ALUMNOS y ALIAS_DEPORTISTAS.
-    """
     global ALUMNOS, ALIAS_DEPORTISTAS
 
     try:
-        alumnos = dv_get_alumnos()
-
+        alumnos = DV.get_alumnos()
     except Exception as e:
         st.error(f"No s'han pogut carregar els esportistes des de Dataverse: {e}")
         alumnos = []
@@ -587,6 +582,7 @@ def cargar_alumnos_desde_dataverse():
 
     ALUMNOS = nombres
     ALIAS_DEPORTISTAS = alias_dict
+
 
 
 # -----------------------
