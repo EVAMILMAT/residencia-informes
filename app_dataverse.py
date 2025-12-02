@@ -83,13 +83,13 @@ ENTITY_INDIV = DV_CFG["informes_ind_entity_set"]         # p.ej. "cr143_informei
 ENTITY_USUARIOS = DV_CFG["usuarios_entity_set"]          # p.ej. "cr143_usuarisaplicacios"
 ENTITY_ALUMNOS = DV_CFG["alumnos_entity_set"]            # p.ej. "cr143_esportistas"
 
-ALUMNOS_NAME_FIELD = "cr143_nomcomplet"   # normalment és el nom primari
-ALUMNOS_ALIAS_FIELD = "cr143_alias"       # camp d'àlies dels esportistes
+# 👇 CAMPO DE LOGIN y CAMPO DE NOMBRE VISIBLE
+# Ajusta USU_LOGIN_FIELD al nombre lógico real de "Nom usuari registre"
+USU_LOGIN_FIELD = "cr143_nomusuariregistre"   # ← CAMBIA si en Dataverse se llama distinto
+USU_NAME_FIELD  = "cr143_nomusuari"           # "Nom usuari" (nombre completo para informes)
 
-# Camp de nom d'usuari (login) i, de moment, també nom visible de cuidador
-USUARIO_LOGIN_FIELD = "cr143_nomusuari"
-USUARIO_PASSWORD_FIELD = "cr143_passwordhash"
-CUIDADOR_NAME_FIELD = "cr143_nomusuari"   # si tens un altre camp per al nom "bonic", el pots canviar aquí
+ALUMNOS_NAME_FIELD = "cr143_nomcomplet"   # normalment és el nom primari
+ALUMNOS_ALIAS_FIELD = "cr143_alias"       # CAMP d'àlies
 
 
 class DataverseClient:
@@ -157,69 +157,63 @@ class DataverseClient:
         return r
 
     # =========================================================
-    # 🔶 USUARIOS (login + cuidador) – tabla cr143_usuarisaplicacios
+    # 🔶 USUARIOS (login / nombre visible) – tabla cr143_usuarisaplicacios
     # =========================================================
-    def get_usuario_hash(self, usuario: str) -> str | None:
+    def _get_usuario_registro(self, usuario_login: str) -> dict | None:
         """
-        Devuelve el hash de contraseña almacenado en Dataverse para un usuario.
-        Usa USUARIO_LOGIN_FIELD y USUARIO_PASSWORD_FIELD.
+        Devuelve el registro completo del usuario a partir de 'Nom usuari registre'
+        (campo USU_LOGIN_FIELD).
         """
-        usuario_esc = usuario.replace("'", "''")
-        filtro = f"{USUARIO_LOGIN_FIELD} eq '{usuario_esc}'"
+        usuario_esc = usuario_login.replace("'", "''")
+        filtro = f"{USU_LOGIN_FIELD} eq '{usuario_esc}'"
         endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
         data = self.get(endpoint)
         if not data or not data.get("value"):
             return None
-        return data["value"][0].get(USUARIO_PASSWORD_FIELD)
+        return data["value"][0]
 
-    def set_usuario_hash(self, usuario: str, password_hash: str):
+    def get_usuario_hash(self, usuario_login: str) -> str | None:
+        """
+        Devuelve el hash de contraseña almacenado en Dataverse para un usuario.
+        Busca por 'Nom usuari registre' (USU_LOGIN_FIELD) y lee cr143_passwordhash.
+        """
+        rec = self._get_usuario_registro(usuario_login)
+        if not rec:
+            return None
+        return rec.get("cr143_passwordhash")
+
+    def set_usuario_hash(self, usuario_login: str, password_hash: str):
         """
         Crea o actualiza el hash de contraseña de un usuario en Dataverse.
+        Se identifica por 'Nom usuari registre' (USU_LOGIN_FIELD).
         """
-        usuario_esc = usuario.replace("'", "''")
-        filtro = f"{USUARIO_LOGIN_FIELD} eq '{usuario_esc}'"
+        usuario_esc = usuario_login.replace("'", "''")
+        filtro = f"{USU_LOGIN_FIELD} eq '{usuario_esc}'"
         endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
         data = self.get(endpoint)
+
         payload = {
-            USUARIO_LOGIN_FIELD: usuario,
-            USUARIO_PASSWORD_FIELD: password_hash,
+            USU_LOGIN_FIELD: usuario_login,          # valor para 'Nom usuari registre'
+            "cr143_passwordhash": password_hash,
         }
 
         if data and data.get("value"):
-            # Update (PATCH)
-            # ID lógico de la tabla de usuarios (ajusta si es distinto)
+            # Update (PATCH) sobre el registro existente
             rec_id = data["value"][0]["cr143_usuarisaplicacioid"]
             self.patch(f"{ENTITY_USUARIOS}({rec_id})", payload)
         else:
-            # Create (POST)
+            # Create (POST) – crea un registro con login + passwordhash
             self.post(ENTITY_USUARIOS, payload)
 
-    def get_usuarios_cuidadores(self) -> list[dict]:
+    def get_usuario_nombre_visible(self, usuario_login: str) -> str | None:
         """
-        Devuelve una lista de dict:
-        [{ "usuario": <login>, "cuidador": <nombre visible> }, ...]
-        usando la tabla de usuaris.
-
-        De momento tomamos el nombre visible del mismo campo que el login
-        (CUIDADOR_NAME_FIELD = cr143_nomusuari). Si en tu tabla tienes
-        un campo específico para el nombre del cuidador, solo hay que
-        cambiar CUIDADOR_NAME_FIELD arriba.
+        A partir del login (Nom usuari registre) devuelve el 'Nom usuari'
+        que queremos mostrar como cuidador en los informes.
         """
-        data = self.get(ENTITY_USUARIOS)
-        if not data or "value" not in data:
-            return []
-
-        res: list[dict] = []
-        for rec in data["value"]:
-            login = (rec.get(USUARIO_LOGIN_FIELD) or "").strip()
-            nombre_cuidador = (rec.get(CUIDADOR_NAME_FIELD) or "").strip()
-            if not login or not nombre_cuidador:
-                continue
-            res.append({
-                "usuario": login,
-                "cuidador": nombre_cuidador,
-            })
-        return res
+        rec = self._get_usuario_registro(usuario_login)
+        if not rec:
+            return None
+        return (rec.get(USU_NAME_FIELD) or "").strip()
 
     # =========================================================
     # 🔶 INFORME GENERAL – tabla cr143_informegeneral
@@ -264,7 +258,7 @@ class DataverseClient:
         payload = {
             "cr143_fechainforme": fecha_date,
             "cr143_codigofecha": fecha_iso,
-            "cr143_cuidador": cuidador or "",
+            "cr143_cuidador": cuidador or "",          # aquí se guarda el NOM USUARI (nombre visible)
             "cr143_informedeldia": entradas or "",
             "cr143_notesdireccio": mantenimiento or "",
             "cr143_picnics": temas or "",
@@ -1193,22 +1187,41 @@ def comprobar_sobrescribir_individual(fecha_iso: str, alumno: str) -> bool:
 # Formulari Informe General (Dataverse)
 # -----------------------
 
+def obtener_cuidador_para_usuario_session() -> str:
+    """
+    A partir de l'usuari amb el qual s'ha fet login (st.session_state['usuario']),
+    obté el nom de cuidador/a que s'ha de guardar a l'informe.
+
+    Ara mateix usa la columna cr143_nomusuari tant per al login com per al nom visible.
+    Si més endavant tens una columna diferent per al nom "bonic", aquí és on s'ha de canviar.
+    """
+    usuario_login = st.session_state.get("usuario", "")
+    if not usuario_login:
+        return ""
+
+    try:
+        usuario_esc = usuario_login.replace("'", "''")
+        filtro = f"cr143_nomusuari eq '{usuario_esc}'"
+        endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
+        data = DV.get(endpoint)
+
+        if not data or not data.get("value"):
+            return usuario_login  # com a mínim, torna el login
+
+        rec = data["value"][0]
+
+        # Ara mateix fem servir el mateix camp per login i nom visible.
+        # Si tens un altre camp (per ex. cr143_nomcomplet), posa'l aquí.
+        nombre_visible = (rec.get("cr143_nomusuari") or "").strip()
+        return nombre_visible or usuario_login
+
+    except Exception as e:
+        st.error(f"No s'ha pogut determinar el cuidador a partir de l'usuari: {e}")
+        return ""
+
+
 def formulario_informe_general():
     st.header("🗓️ Introduir informe general")
-
-    # --- Determinar cuidador a partir de l'usuari autenticat ---
-    usuario_actual = st.session_state.get("usuario", "").strip()
-    if not usuario_actual:
-        st.error("No s'ha pogut determinar l'usuari actual. Torna a iniciar sessió.")
-        return
-
-    # En aquesta versió, el nom de cuidador és el mateix que l'usuari
-    cuidador_actual = usuario_actual
-
-    # --- Assegurar que els esportistes estiguin carregats (per si falla en main) ---
-    global ALUMNOS, ALIAS_DEPORTISTAS
-    if not ALUMNOS:
-        cargar_alumnos_desde_dataverse()
 
     # --- Estat inicial ---
     if "informe_general" not in st.session_state:
@@ -1252,8 +1265,6 @@ def formulario_informe_general():
         if informe:
             # Hi ha informe a Dataverse → omplim i bloquejam
             st.session_state["informe_general"] = {
-                # Encara que a Dataverse hi hagi un altre valor,
-                # per aquesta sessió el cuidador serà l'usuari actual:
                 "cuidador": informe.get("cuidador", "") or "",
                 "entradas": informe.get("entradas", "") or "",
                 "mantenimiento": informe.get("mantenimiento", "") or "",
@@ -1280,8 +1291,10 @@ def formulario_informe_general():
             st.session_state["bloqueado"] = True
         else:
             # No hi ha informe per aquest dia → formulari en blanc
+            cuidador_sessio = obtener_cuidador_para_usuario_session()
+
             st.session_state["informe_general"] = {
-                "cuidador": "",
+                "cuidador": cuidador_sessio,
                 "entradas": "",
                 "mantenimiento": "",
                 "temas": "",
@@ -1301,11 +1314,6 @@ def formulario_informe_general():
     # --- Àlies d'esportistes (no toca l'estat del formulari) ---
     with st.expander("👀 Consultar àlies d'esportistes (@)", expanded=False):
         st.caption("Fes servir aquests àlies al text: @ainaR, @marcA…")
-
-        # Per si ALUMNOS segueix buit per algun motiu, tornam a intentar carregar
-        if not ALUMNOS:
-            cargar_alumnos_desde_dataverse()
-
         df_alias = pd.DataFrame(
             [{"Esportista": n, "Àlies": ALIAS_DEPORTISTAS.get(n, "")} for n in ALUMNOS]
         )
@@ -1322,9 +1330,12 @@ def formulario_informe_general():
     with st.form("form_informe_general", clear_on_submit=False):
         disabled = bloqueado
 
-        # Cuidador: fixat per la sessió, no editable
-        st.markdown(f"**Cuidador/a (sessió actual):** `{cuidador_actual}`")
-        cuidador_sel = cuidador_actual
+        # Cuidador/a: només mostrar, no permetre canviar des del formulari
+        cuidador_txt = st.text_input(
+            "Cuidador/a",
+            value=info.get("cuidador", ""),
+            disabled=True
+        )
 
         entradas_txt = st.text_area(
             "Informe del dia",
@@ -1417,14 +1428,18 @@ def formulario_informe_general():
 
     # --- Desar a Dataverse ---
     if submitted_enviar or submitted_sense_enviar:
-        if not cuidador_sel:
-            st.warning("⚠️ No s'ha pogut determinar el cuidador per aquesta sessió.")
-            return
-
-        info["cuidador"] = cuidador_sel
+        # Actualitzar informació a partir del formulari
+        info["cuidador"] = cuidador_txt
         info["entradas"] = entradas_txt
         info["mantenimiento"] = mantenimiento_txt
         info["temas"] = temas_txt
+
+        if not info["cuidador"]:
+            st.warning(
+                "⚠️ No s'ha pogut determinar el cuidador per aquesta sessió. "
+                "Revisa la configuració de la taula d'usuaris a Dataverse."
+            )
+            return
 
         taxis_records = st.session_state["taxis_df"].to_dict("records")
         info["taxis"] = taxis_records
