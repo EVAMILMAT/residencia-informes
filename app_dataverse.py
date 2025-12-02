@@ -2253,27 +2253,31 @@ def main():
     elif vista == "cambiar_contraseña":
         cambiar_contraseña()
 
-       elif vista == "historico":
+    elif vista == "historico":
         st.header("🖨️ Imprimir històric d'informes")
+
         tipo = st.radio(
             "Seleccionar tipus d'històric",
             ["Històric individual", "Històric general", "Històric taxis"]
         )
+
         desde = st.date_input("Des de")
         hasta = st.date_input("Fins a")
 
         st.divider()
 
         # ============================================================
-        # HISTÓRICO INDIVIDUAL (ja usa Dataverse)
+        # HISTÒRIC INDIVIDUAL (Dataverse)
         # ============================================================
         if tipo == "Històric individual":
             alumno = st.selectbox("Seleccionar esportista", ALUMNOS)
+
             if st.button("📄 Generar històric individual"):
                 if not alumno:
                     st.warning("Has de seleccionar un esportista.")
                 else:
                     pdf = generar_pdf_historico_individual(alumno, desde, hasta)
+
                     if pdf:
                         st.success(
                             f"✅ Històric generat correctament "
@@ -2290,11 +2294,12 @@ def main():
                         st.info("No hi ha informes en el rang seleccionat.")
 
         # ============================================================
-        # HISTÓRICO GENERAL (ja usa Dataverse)
+        # HISTÒRIC GENERAL (Dataverse)
         # ============================================================
         elif tipo == "Històric general":
             if st.button("📄 Generar històric general"):
                 pdf = generar_pdf_historico_general(desde, hasta)
+
                 if pdf:
                     st.success(
                         f"✅ Històric generat correctament "
@@ -2311,15 +2316,12 @@ def main():
                     st.info("No hi ha informes generals en aquest rang.")
 
         # ============================================================
-        # HISTÓRICO TAXIS - PDF + EXCEL (ja usa Dataverse)
+        # HISTÒRIC TAXIS (Dataverse)
         # ============================================================
         elif tipo == "Històric taxis":
             if st.button("🚕 Generar històric de taxis"):
 
-                # PDF
                 pdf = generar_pdf_historico_taxis(desde, hasta)
-
-                # Excel (DataFrame)
                 df_taxis = obtener_historico_taxis_df(desde, hasta)
 
                 if not pdf and df_taxis is None:
@@ -2330,7 +2332,6 @@ def main():
                         f"({desde.strftime('%d/%m/%Y')} - {hasta.strftime('%d/%m/%Y')})"
                     )
 
-                    # ---- Botón PDF ----
                     if pdf:
                         with open(pdf, "rb") as f:
                             st.download_button(
@@ -2340,15 +2341,10 @@ def main():
                                 mime="application/pdf"
                             )
 
-                    # ---- Botón Excel ----
                     if df_taxis is not None:
                         buffer = io.BytesIO()
                         with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-                            df_taxis.to_excel(
-                                writer,
-                                index=False,
-                                sheet_name="Taxis"
-                            )
+                            df_taxis.to_excel(writer, index=False, sheet_name="Taxis")
                         buffer.seek(0)
 
                         nombre_excel = (
@@ -2363,10 +2359,11 @@ def main():
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
 
-        # Botón volver al menú
+        # Botó tornar al menú
         if st.button("🏠 Tornar al menú"):
             st.session_state["vista_actual"] = "menu"
             st.rerun()
+
 
 
 
