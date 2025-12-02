@@ -27,9 +27,12 @@ PDFS_DIR = "pdfs"
 os.makedirs(PDFS_DIR, exist_ok=True)
 
 # -----------------------
-# Listas de cuidadores
+# Listas de cuidadores (se cargan desde Dataverse)
 # -----------------------
-CUIDADORES = ["", "Israel Pampin", "Marta Oliver", "Eva Milán"]
+# CUIDADORES: lista de nombres visibles en el select del informe general
+# MAPA_USUARIO_A_CUIDADOR: mapea el "login" (usuari que entra) al nom de cuidador
+CUIDADORES: list[str] = []
+MAPA_USUARIO_A_CUIDADOR: dict[str, str] = {}
 
 # -----------------------
 # Alias de esportistes (des de Dataverse)
@@ -77,10 +80,17 @@ API_BASE = DV_CFG["api_base"]
 ENTITY_INFORMES = DV_CFG["informes_entity_set"]          # p.ej. "cr143_informegenerals"
 ENTITY_TAXIS = DV_CFG["taxis_entity_set"]                # p.ej. "cr143_taxis"
 ENTITY_INDIV = DV_CFG["informes_ind_entity_set"]         # p.ej. "cr143_informeindividuals"
-ENTITY_USUARIOS = DV_CFG["usuarios_entity_set"]          # p.ej. "cr143_usuariaplicacios"
+ENTITY_USUARIOS = DV_CFG["usuarios_entity_set"]          # p.ej. "cr143_usuarisaplicacios"
 ENTITY_ALUMNOS = DV_CFG["alumnos_entity_set"]            # p.ej. "cr143_esportistas"
+
 ALUMNOS_NAME_FIELD = "cr143_nomcomplet"   # normalment és el nom primari
-ALUMNOS_ALIAS_FIELD = "cr143_alias"           # CAMBIA ESTO si tu columna alias se llama distinto
+ALUMNOS_ALIAS_FIELD = "cr143_alias"       # camp d'àlies dels esportistes
+
+# Camp de nom d'usuari (login) i, de moment, també nom visible de cuidador
+USUARIO_LOGIN_FIELD = "cr143_nomusuari"
+USUARIO_PASSWORD_FIELD = "cr143_passwordhash"
+CUIDADOR_NAME_FIELD = "cr143_nomusuari"   # si tens un altre camp per al nom "bonic", el pots canviar aquí
+
 
 class DataverseClient:
     def __init__(self):
@@ -147,41 +157,69 @@ class DataverseClient:
         return r
 
     # =========================================================
-    # 🔶 USUARIOS (login) – tabla cr143_usuariaplicacio
+    # 🔶 USUARIOS (login + cuidador) – tabla cr143_usuarisaplicacios
     # =========================================================
     def get_usuario_hash(self, usuario: str) -> str | None:
         """
         Devuelve el hash de contraseña almacenado en Dataverse para un usuario.
-        Usa la columna cr143_nomusuari y cr143_passwordhash.
+        Usa USUARIO_LOGIN_FIELD y USUARIO_PASSWORD_FIELD.
         """
         usuario_esc = usuario.replace("'", "''")
-        filtro = f"cr143_nomusuari eq '{usuario_esc}'"
+        filtro = f"{USUARIO_LOGIN_FIELD} eq '{usuario_esc}'"
         endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
         data = self.get(endpoint)
         if not data or not data.get("value"):
             return None
-        return data["value"][0].get("cr143_passwordhash")
+        return data["value"][0].get(USUARIO_PASSWORD_FIELD)
 
     def set_usuario_hash(self, usuario: str, password_hash: str):
         """
         Crea o actualiza el hash de contraseña de un usuario en Dataverse.
         """
         usuario_esc = usuario.replace("'", "''")
-        filtro = f"cr143_nomusuari eq '{usuario_esc}'"
+        filtro = f"{USUARIO_LOGIN_FIELD} eq '{usuario_esc}'"
         endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
         data = self.get(endpoint)
         payload = {
-            "cr143_nomusuari": usuario,
-            "cr143_passwordhash": password_hash,
+            USUARIO_LOGIN_FIELD: usuario,
+            USUARIO_PASSWORD_FIELD: password_hash,
         }
 
         if data and data.get("value"):
             # Update (PATCH)
-            rec_id = data["value"][0]["cr143_usuariaplicacioid"]
+            # ID lógico de la tabla de usuarios (ajusta si es distinto)
+            rec_id = data["value"][0]["cr143_usuarisaplicacioid"]
             self.patch(f"{ENTITY_USUARIOS}({rec_id})", payload)
         else:
             # Create (POST)
             self.post(ENTITY_USUARIOS, payload)
+
+    def get_usuarios_cuidadores(self) -> list[dict]:
+        """
+        Devuelve una lista de dict:
+        [{ "usuario": <login>, "cuidador": <nombre visible> }, ...]
+        usando la tabla de usuaris.
+
+        De momento tomamos el nombre visible del mismo campo que el login
+        (CUIDADOR_NAME_FIELD = cr143_nomusuari). Si en tu tabla tienes
+        un campo específico para el nombre del cuidador, solo hay que
+        cambiar CUIDADOR_NAME_FIELD arriba.
+        """
+        data = self.get(ENTITY_USUARIOS)
+        if not data or "value" not in data:
+            return []
+
+        res: list[dict] = []
+        for rec in data["value"]:
+            login = (rec.get(USUARIO_LOGIN_FIELD) or "").strip()
+            nombre_cuidador = (rec.get(CUIDADOR_NAME_FIELD) or "").strip()
+            if not login or not nombre_cuidador:
+                continue
+            res.append({
+                "usuario": login,
+                "cuidador": nombre_cuidador,
+            })
+        return res
 
     # =========================================================
     # 🔶 INFORME GENERAL – tabla cr143_informegeneral
@@ -412,7 +450,6 @@ class DataverseClient:
             return []
 
         res: list[dict] = []
-
         for rec in rows:
             # Nom complet
             nombre = (rec.get(ALUMNOS_NAME_FIELD) or "").strip()
@@ -427,8 +464,6 @@ class DataverseClient:
             res.append({"nombre": nombre, "alias": alias})
 
         return res
-
-
 
     # =========================================================
     # 🔶 HELPERS EXTRA PARA HISTÓRICOS Y CONSULTAS
@@ -570,6 +605,47 @@ def cargar_alumnos_desde_dataverse():
     ALUMNOS = nombres
     ALIAS_DEPORTISTAS = alias_dict
 
+
+# -----------------------
+# Carga de cuidadores desde Dataverse
+# -----------------------
+def cargar_cuidadores_desde_dataverse():
+    """
+    Omple les variables globals:
+      - CUIDADORES: llista de noms de cuidador
+      - MAPA_USUARIO_A_CUIDADOR: login -> nom de cuidador
+
+    A partir de la taula de usuaris (ENTITY_USUARIOS).
+    """
+    global CUIDADORES, MAPA_USUARIO_A_CUIDADOR
+
+    try:
+        filas = DV.get_usuarios_cuidadores()
+    except Exception as e:
+        st.error(f"No s'han pogut carregar els cuidadors des de Dataverse: {e}")
+        filas = []
+
+    noms: list[str] = []
+    mapa: dict[str, str] = {}
+
+    for fila in filas:
+        usu = fila.get("usuario", "").strip()
+        nom = fila.get("cuidador", "").strip()
+        if not usu or not nom:
+            continue
+        noms.append(nom)
+        mapa[usu] = nom
+
+    # Eliminem duplicats mantenint l'ordre
+    vistos = set()
+    noms_unics: list[str] = []
+    for n in noms:
+        if n not in vistos:
+            vistos.add(n)
+            noms_unics.append(n)
+
+    CUIDADORES = noms_unics
+    MAPA_USUARIO_A_CUIDADOR = mapa
 
 
 # -----------------------
@@ -1120,7 +1196,9 @@ def comprobar_sobrescribir_individual(fecha_iso: str, alumno: str) -> bool:
 def formulario_informe_general():
     st.header("🗓️ Introduir informe general")
 
-    cuidadores = CUIDADORES
+    # Usuari actual (login) i nom de cuidador associat
+    usuario_actual = st.session_state.get("usuario", "") or ""
+    cuidador_sessio = MAPA_USUARIO_A_CUIDADOR.get(usuario_actual, "")
 
     # --- Estat inicial ---
     if "informe_general" not in st.session_state:
@@ -1207,10 +1285,6 @@ def formulario_informe_general():
 
     info = st.session_state["informe_general"]
     bloqueado = st.session_state["bloqueado"]
-   
-    # --- Assegurar que els alumnes estan carregats ---
-    if not ALUMNOS:
-        cargar_alumnos_desde_dataverse()
 
     # --- Àlies d'esportistes (no toca l'estat del formulari) ---
     with st.expander("👀 Consultar àlies d'esportistes (@)", expanded=False):
@@ -1231,13 +1305,17 @@ def formulario_informe_general():
     with st.form("form_informe_general", clear_on_submit=False):
         disabled = bloqueado
 
-        idx = cuidadores.index(info["cuidador"]) if info["cuidador"] in cuidadores else 0
-        cuidador_sel = st.selectbox(
-            "Cuidador/a",
-            cuidadores,
-            index=idx,
-            disabled=disabled
-        )
+        # --------------------------
+        # Cuidador/a fix segons sessió
+        # --------------------------
+        if disabled:
+            # Informe bloquejat: mostram el cuidador que hi ha guardat
+            cuidador_sel = info.get("cuidador", "") or ""
+            st.markdown(f"**Cuidador/a (informació guardada):** {cuidador_sel or '—'}")
+        else:
+            # Informe editable: el cuidador es fixa al de la sessió
+            cuidador_sel = cuidador_sessio
+            st.markdown(f"**Cuidador/a:** {cuidador_sel or '—'}")
 
         entradas_txt = st.text_area(
             "Informe del dia",
@@ -1331,7 +1409,8 @@ def formulario_informe_general():
     # --- Desar a Dataverse ---
     if submitted_enviar or submitted_sense_enviar:
         if not cuidador_sel:
-            st.warning("⚠️ Has de seleccionar un cuidador abans de desar l'informe.")
+            st.warning("⚠️ No s'ha pogut determinar el cuidador per aquesta sessió. "
+                       "Revisa la configuració de la taula d'usuaris a Dataverse.")
             return
 
         info["cuidador"] = cuidador_sel
@@ -1407,7 +1486,6 @@ def formulario_informe_general():
                 st.session_state["fecha_cargada"] = None
                 st.session_state["vista_actual"] = "menu"
                 st.rerun()
-
 
 
         
@@ -2221,8 +2299,10 @@ def main():
         login()
         return
 
-    # --- Càrrega d'esportistes des de Dataverse (cada vegada que es pinta la pàgina) ---
-    cargar_alumnos_desde_dataverse()
+    # --- Càrrega d'esportistes des de Dataverse (una vegada per sessió) ---
+    if "alumnos_cargados" not in st.session_state:
+        cargar_alumnos_desde_dataverse()
+        st.session_state["alumnos_cargados"] = True
 
     # --- Barra lateral ---
     st.sidebar.markdown(f"👤 Usuari: **{st.session_state.get('usuario','').capitalize()}**")
@@ -2255,29 +2335,25 @@ def main():
 
     elif vista == "historico":
         st.header("🖨️ Imprimir històric d'informes")
-
         tipo = st.radio(
             "Seleccionar tipus d'històric",
             ["Històric individual", "Històric general", "Històric taxis"]
         )
-
         desde = st.date_input("Des de")
         hasta = st.date_input("Fins a")
 
         st.divider()
 
         # ============================================================
-        # HISTÒRIC INDIVIDUAL (Dataverse)
+        # HISTÓRICO INDIVIDUAL (Dataverse)
         # ============================================================
         if tipo == "Històric individual":
             alumno = st.selectbox("Seleccionar esportista", ALUMNOS)
-
             if st.button("📄 Generar històric individual"):
                 if not alumno:
                     st.warning("Has de seleccionar un esportista.")
                 else:
                     pdf = generar_pdf_historico_individual(alumno, desde, hasta)
-
                     if pdf:
                         st.success(
                             f"✅ Històric generat correctament "
@@ -2294,12 +2370,11 @@ def main():
                         st.info("No hi ha informes en el rang seleccionat.")
 
         # ============================================================
-        # HISTÒRIC GENERAL (Dataverse)
+        # HISTÓRICO GENERAL (Dataverse)
         # ============================================================
         elif tipo == "Històric general":
             if st.button("📄 Generar històric general"):
                 pdf = generar_pdf_historico_general(desde, hasta)
-
                 if pdf:
                     st.success(
                         f"✅ Històric generat correctament "
@@ -2316,12 +2391,15 @@ def main():
                     st.info("No hi ha informes generals en aquest rang.")
 
         # ============================================================
-        # HISTÒRIC TAXIS (Dataverse)
+        # HISTÓRICO TAXIS - PDF + EXCEL (Dataverse)
         # ============================================================
         elif tipo == "Històric taxis":
             if st.button("🚕 Generar històric de taxis"):
 
+                # PDF
                 pdf = generar_pdf_historico_taxis(desde, hasta)
+
+                # Excel (DataFrame)
                 df_taxis = obtener_historico_taxis_df(desde, hasta)
 
                 if not pdf and df_taxis is None:
@@ -2332,6 +2410,7 @@ def main():
                         f"({desde.strftime('%d/%m/%Y')} - {hasta.strftime('%d/%m/%Y')})"
                     )
 
+                    # ---- Botón PDF ----
                     if pdf:
                         with open(pdf, "rb") as f:
                             st.download_button(
@@ -2341,10 +2420,15 @@ def main():
                                 mime="application/pdf"
                             )
 
+                    # ---- Botón Excel ----
                     if df_taxis is not None:
                         buffer = io.BytesIO()
                         with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-                            df_taxis.to_excel(writer, index=False, sheet_name="Taxis")
+                            df_taxis.to_excel(
+                                writer,
+                                index=False,
+                                sheet_name="Taxis"
+                            )
                         buffer.seek(0)
 
                         nombre_excel = (
@@ -2359,14 +2443,13 @@ def main():
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
 
-        # Botó tornar al menú
+        # Botón volver al menú
         if st.button("🏠 Tornar al menú"):
             st.session_state["vista_actual"] = "menu"
             st.rerun()
 
 
-
-
 if __name__ == "__main__":
     main()
+
 
