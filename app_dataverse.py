@@ -368,7 +368,7 @@ class DataverseClient:
         rec = data["value"][0]
         return {
             "id": rec.get("cr143_informeindividualid"),
-            "contenido": rec.get("cr143_contingut") or "",
+            "contenido": rec.get("cr143_congingut") or "",
         }
 
     def upsert_informe_individual(
@@ -389,7 +389,7 @@ class DataverseClient:
             "cr143_codigofecha": fecha_iso,
             "cr143_alumne": alumno,
             "cr143_alias": alias or "",
-            "cr143_contingut": contenido or "",
+            "cr143_congingut": contenido or "",
         }
 
         if existente and existente.get("id"):
@@ -422,7 +422,7 @@ class DataverseClient:
                     fecha_iso = datetime.fromisoformat(fecha_raw).date().strftime("%Y-%m-%d")
                 except Exception:
                     fecha_iso = ""
-            res.append((fecha_iso, rec.get("cr143_contingut") or ""))
+            res.append((fecha_iso, rec.get("cr143_congingut") or ""))
         return res
 
     # =========================================================
