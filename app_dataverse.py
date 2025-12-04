@@ -82,6 +82,11 @@ ENTITY_TAXIS = DV_CFG["taxis_entity_set"]                # p.ej. "cr143_taxis"
 ENTITY_INDIV = DV_CFG["informes_ind_entity_set"]         # p.ej. "cr143_informeindividuals"
 ENTITY_USUARIOS = DV_CFG["usuarios_entity_set"]          # p.ej. "cr143_usuarisaplicacios"
 ENTITY_ALUMNOS = DV_CFG["alumnos_entity_set"]            # p.ej. "cr143_esportistas"
+# Camp d'usuari per fer login i camp de nom visible
+USUARIOS_LOGIN_FIELD = "cr143_nomusuariregistre"   # usuari de login (minúscules, el que poses a secrets)
+USUARIOS_NOMBRE_FIELD = "cr143_nomusuari"          # nom complet a mostrar als informes
+
+
 
 # 👇 CAMPO DE LOGIN y CAMPO DE NOMBRE VISIBLE
 # Ajusta USU_LOGIN_FIELD al nombre lógico real de "Nom usuari registre"
@@ -188,7 +193,7 @@ class DataverseClient:
         Se identifica por 'Nom usuari registre' (USU_LOGIN_FIELD).
         """
         usuario_esc = usuario_login.replace("'", "''")
-        filtro = f"{USU_LOGIN_FIELD} eq '{usuario_esc}'"
+        filtro = f"{USUARIOS_LOGIN_FIELD} eq '{usuario_esc}'"
         endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
         data = self.get(endpoint)
 
@@ -1192,8 +1197,8 @@ def obtener_cuidador_para_usuario_session() -> str:
     A partir de l'usuari amb el qual s'ha fet login (st.session_state['usuario']),
     obté el nom de cuidador/a que s'ha de guardar a l'informe.
 
-    Ara mateix usa la columna cr143_nomusuari tant per al login com per al nom visible.
-    Si més endavant tens una columna diferent per al nom "bonic", aquí és on s'ha de canviar.
+    - El login ve de USUARIOS_LOGIN_FIELD (cr143_nomusuariregistre)
+    - El nom visible ve de USUARIOS_NOMBRE_FIELD (cr143_nomusuari)
     """
     usuario_login = st.session_state.get("usuario", "")
     if not usuario_login:
@@ -1201,27 +1206,31 @@ def obtener_cuidador_para_usuario_session() -> str:
 
     try:
         usuario_esc = usuario_login.replace("'", "''")
-        filtro = f"cr143_nomusuari eq '{usuario_esc}'"
+        filtro = f"{USUARIOS_LOGIN_FIELD} eq '{usuario_esc}'"
         endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
         data = DV.get(endpoint)
 
         if not data or not data.get("value"):
-            return usuario_login  # com a mínim, torna el login
+            # Si no trobam res, com a mínim tornam el login
+            return usuario_login
 
         rec = data["value"][0]
 
-        # Ara mateix fem servir el mateix camp per login i nom visible.
-        # Si tens un altre camp (per ex. cr143_nomcomplet), posa'l aquí.
-        nombre_visible = (rec.get("cr143_nomusuari") or "").strip()
+        # Nom visible (complet) per als informes
+        nombre_visible = (rec.get(USUARIOS_NOMBRE_FIELD) or "").strip()
         return nombre_visible or usuario_login
 
     except Exception as e:
         st.error(f"No s'ha pogut determinar el cuidador a partir de l'usuari: {e}")
-        return ""
+        return usuario_login
 
 
 def formulario_informe_general():
     st.header("🗓️ Introduir informe general")
+
+    # Asseguram que els alumnes i àlies estiguin carregats
+    if not ALUMNOS:
+        cargar_alumnos_desde_dataverse()
 
     # --- Estat inicial ---
     if "informe_general" not in st.session_state:
