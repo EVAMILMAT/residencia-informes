@@ -482,7 +482,7 @@ class DataverseClient:
                 alumnes.append(nom)
         return alumnes
 
-       def get_informes_generales_rango(self, desde_iso: str, hasta_iso: str) -> list[dict]:
+    def get_informes_generales_rango(self, desde_iso: str, hasta_iso: str) -> list[dict]:
         """
         Retorna una llista de dicts d'informes generals entre dues dates (YYYY-MM-DD).
         """
@@ -498,6 +498,7 @@ class DataverseClient:
             "cr143_notesdireccio",
             "cr143_picnics",
         ])
+
         endpoint = (
             f"{ENTITY_INFORMES}"
             f"?$filter={filtro}"
@@ -512,6 +513,7 @@ class DataverseClient:
         for rec in rows:
             fecha_raw = (rec.get("cr143_codigofecha") or "").strip()
             fecha_iso = fecha_raw.split("T")[0] if fecha_raw else ""
+
             res.append({
                 "id": rec.get("cr143_informegeneralid"),
                 "fecha": fecha_iso,
@@ -520,6 +522,7 @@ class DataverseClient:
                 "mantenimiento": rec.get("cr143_notesdireccio") or "",
                 "temas": rec.get("cr143_picnics") or "",
             })
+
         return res
 
     def get_informes_generales_todos(self) -> list[dict]:
