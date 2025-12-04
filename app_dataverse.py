@@ -1612,64 +1612,64 @@ def formulario_informe_individual():
     # -----------------------------------------
     # Funció interna per desar i tornar al menú
     # -----------------------------------------
-      def guardar_i_tornar(enviar=True):
-        # Validació: alumne obligatori
-        if not alumno:
-            st.warning("⚠️ Has de seleccionar un alumne abans de desar l'informe.")
-            return
+        def guardar_i_tornar(enviar=True):
+            # Validació: alumne obligatori
+            if not alumno:
+                st.warning("⚠️ Has de seleccionar un alumne abans de desar l'informe.")
+                return
 
-        alias = ALIAS_DEPORTISTAS.get(alumno) or generar_alias(alumno)
-        contenido_norm = (contenido or "").strip()
+            alias = ALIAS_DEPORTISTAS.get(alumno) or generar_alias(alumno)
+            contenido_norm = (contenido or "").strip()
 
-        # Si el contingut està buit → eliminar informe si existeix
-        if contenido_norm == "":
+            # Si el contingut està buit → eliminar informe si existeix
+            if contenido_norm == "":
+                try:
+                    DV.upsert_informe_individual(
+                        fecha_iso=fecha_iso,
+                        alumno=alumno,
+                        alias=alias,
+                        contenido=""  # senyal per eliminar
+                    )
+                except Exception as e:
+                    st.error(f"Error eliminant l'informe individual a Dataverse: {e}")
+                    return
+
+                st.success("🗑️ Informe individual eliminat per aquesta data.")
+                st.session_state["forzar_edicion_individual"] = False
+                st.session_state["confirmar_salir_individual"] = False
+                st.session_state["vista_actual"] = "menu"
+                st.rerun()
+                return
+
+            # Si hi ha contingut → guardar normalment
             try:
                 DV.upsert_informe_individual(
                     fecha_iso=fecha_iso,
                     alumno=alumno,
                     alias=alias,
-                    contenido=""  # senyal perquè l'upsert faci delete
+                    contenido=contenido_norm,
                 )
             except Exception as e:
-                st.error(f"Error eliminant l'informe individual a Dataverse: {e}")
+                st.error(f"Error desant l'informe individual a Dataverse: {e}")
                 return
 
-            st.success("🗑️ Informe individual eliminat per aquesta data.")
+            data_text = fecha_sel.strftime("%d/%m/%Y")
+            pdf = generar_pdf_individual(alumno, contenido_norm, fecha_iso)
+
+            if enviar:
+                enviar_correo(
+                    f"Informe individual - {alumno} - {data_text}",
+                    f"Adjunt informe individual de {alumno} ({data_text})",
+                    [pdf]
+                )
+                st.success(f"✅ Informe individual desat a Dataverse i enviat: {pdf}")
+            else:
+                st.success(f"✅ Informe individual desat a Dataverse (sense enviar correu): {pdf}")
+
             st.session_state["forzar_edicion_individual"] = False
             st.session_state["confirmar_salir_individual"] = False
             st.session_state["vista_actual"] = "menu"
             st.rerun()
-            return
-
-        # Si hi ha contingut → guardar normalment
-        try:
-            DV.upsert_informe_individual(
-                fecha_iso=fecha_iso,
-                alumno=alumno,
-                alias=alias,
-                contenido=contenido_norm,
-            )
-        except Exception as e:
-            st.error(f"Error desant l'informe individual a Dataverse: {e}")
-            return
-
-        data_text = fecha_sel.strftime("%d/%m/%Y")
-        pdf = generar_pdf_individual(alumno, contenido_norm, fecha_iso)
-
-        if enviar:
-            enviar_correo(
-                f"Informe individual - {alumno} - {data_text}",
-                f"Adjunt informe individual de {alumno} ({data_text})",
-                [pdf]
-            )
-            st.success(f"✅ Informe individual desat a Dataverse i enviat: {pdf}")
-        else:
-            st.success(f"✅ Informe individual desat a Dataverse (sense enviar correu): {pdf}")
-
-        st.session_state["forzar_edicion_individual"] = False
-        st.session_state["confirmar_salir_individual"] = False
-        st.session_state["vista_actual"] = "menu"
-        st.rerun()
 
     # ================================
     # BOTONS PRINCIPALS DE DESAR
