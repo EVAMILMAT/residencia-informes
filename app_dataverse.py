@@ -1548,13 +1548,27 @@ def formulario_informe_general():
 def formulario_informe_individual():
     st.header("👤 Introduir informe individual")
 
+    # Asseguram l'accés a les globals
+    global ALUMNOS, ALIAS_DEPORTISTAS
+
+    # Carregar sempre els alumnes des de Dataverse (per si l'estat s'ha perdut)
+    try:
+        cargar_alumnos_desde_dataverse()
+    except Exception as e:
+        st.error(f"No s'han pogut carregar els esportistes des de Dataverse: {e}")
+        ALUMNOS = []
+
     # Control d'edició
     if "forzar_edicion_individual" not in st.session_state:
         st.session_state["forzar_edicion_individual"] = False
     if "alumno_actual_informe" not in st.session_state:
         st.session_state["alumno_actual_informe"] = ""
+    if "confirmar_salir_individual" not in st.session_state:
+        st.session_state["confirmar_salir_individual"] = False
 
+    # -----------------------
     # Selecció de data
+    # -----------------------
     fecha_sel = st.date_input("Data de l'informe", value=date.today(), key="fecha_individual")
     fecha_iso = fecha_sel.isoformat()
 
@@ -1562,9 +1576,26 @@ def formulario_informe_individual():
     fecha_mostrar = fecha_sel.strftime("%d/%m/%Y")
     st.markdown(f"**Data seleccionada:** {fecha_mostrar}")
 
+    # -----------------------
     # Llista d'alumnes amb opció en blanc
+    # -----------------------
+    if not ALUMNOS:
+        st.warning("No s'han trobat esportistes a Dataverse.")
+        if st.button("🏠 Tornar al menú", key="volver_menu_sense_alumnes"):
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
+        return
+
     alumno_lista = [""] + ALUMNOS
     alumno = st.selectbox("Alumne", alumno_lista, index=0)
+
+    # Si no s'ha seleccionat alumne
+    if not alumno:
+        st.info("Seleccionau un alumne per continuar.")
+        if st.button("🏠 Tornar al menú", key="volver_menu_cap_alumne"):
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
+        return
 
     # Si canviem d'alumne, sortim del mode edició forçada
     if alumno != st.session_state["alumno_actual_informe"]:
@@ -1577,16 +1608,15 @@ def formulario_informe_individual():
     contenido_inicial = ""
     tiene_informe = False
 
-    if alumno:
-        try:
-            rec = DV.get_informe_individual(fecha_iso, alumno)
-        except Exception as e:
-            st.error(f"Error llegint informe individual des de Dataverse: {e}")
-            rec = None
+    try:
+        rec = DV.get_informe_individual(fecha_iso, alumno)
+    except Exception as e:
+        st.error(f"Error llegint informe individual des de Dataverse: {e}")
+        rec = None
 
-        if rec:
-            tiene_informe = True
-            contenido_inicial = rec.get("contenido", "") or ""
+    if rec:
+        tiene_informe = True
+        contenido_inicial = rec.get("contenido", "") or ""
 
     bloqueado = tiene_informe and not st.session_state["forzar_edicion_individual"]
 
@@ -1597,7 +1627,9 @@ def formulario_informe_individual():
             st.session_state["forzar_edicion_individual"] = True
             st.rerun()
 
-    # Camp de contingut (valor actual del widget)
+    # -----------------------
+    # Camp de contingut
+    # -----------------------
     contenido = st.text_area(
         "Contingut de l'informe",
         value=contenido_inicial,
@@ -1609,7 +1641,7 @@ def formulario_informe_individual():
     # Funció interna per desar / eliminar i tornar al menú
     # -----------------------------------------
     def guardar_i_tornar(enviar=True):
-        # Validació: alumne obligatori
+        # Validació: alumne obligatori (per seguretat extra)
         if not alumno:
             st.warning("⚠️ Has de seleccionar un alumne abans de desar l'informe.")
             return
