@@ -2381,7 +2381,14 @@ def main():
         # HISTÓRICO INDIVIDUAL (Dataverse)
         # ============================================================
         if tipo == "Històric individual":
-            alumno = st.selectbox("Seleccionar esportista", ALUMNOS)
+            # Asegurar que la lista de alumnos está cargada
+            if not ALUMNOS:
+                cargar_alumnos_desde_dataverse()
+
+            # Selector de esportista con opción en blanco
+            alumno_lista = [""] + ALUMNOS
+            alumno = st.selectbox("Seleccionar esportista", alumno_lista, index=0)
+
             if st.button("📄 Generar històric individual"):
                 if not alumno:
                     st.warning("Has de seleccionar un esportista.")
@@ -2484,5 +2491,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
