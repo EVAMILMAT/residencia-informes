@@ -380,16 +380,28 @@ class DataverseClient:
     ) -> str | None:
         """
         Crea o actualiza un informe individual (fecha, alumno).
+        Si el contenido llega vacío (después de strip) y ya existe registro,
+        se elimina el informe en lugar de dejarlo en blanco.
         """
         existente = self.get_informe_individual(fecha_iso, alumno)
+        contenido_norm = (contenido or "").strip()
 
+        # Si no hi ha contingut i existeix registre → ELIMINAR
+        if contenido_norm == "":
+            if existente and existente.get("id"):
+                rec_id = existente["id"]
+                self.delete(f"{ENTITY_INDIV}({rec_id})")
+            # Si no existia, no cream res
+            return None
+
+        # Si hi ha contingut → crear/actualitzar normalment
         fecha_date = datetime.strptime(fecha_iso, "%Y-%m-%d").date().isoformat()
         payload = {
             "cr143_fechainforme": fecha_date,
             "cr143_codigofecha": fecha_iso,
             "cr143_alumne": alumno,
             "cr143_alias": alias or "",
-            "cr143_congingut": contenido or "",
+            "cr143_congingut": contenido_norm,
         }
 
         if existente and existente.get("id"):
@@ -402,6 +414,7 @@ class DataverseClient:
             if location and "(" in location and ")" in location:
                 return location.split("(")[1].split(")")[0]
             return None
+
 
     def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, str]]:
         """
@@ -1599,27 +1612,49 @@ def formulario_informe_individual():
     # -----------------------------------------
     # Funció interna per desar i tornar al menú
     # -----------------------------------------
-    def guardar_i_tornar(enviar=True):
+      def guardar_i_tornar(enviar=True):
         # Validació: alumne obligatori
         if not alumno:
             st.warning("⚠️ Has de seleccionar un alumne abans de desar l'informe.")
             return
 
         alias = ALIAS_DEPORTISTAS.get(alumno) or generar_alias(alumno)
+        contenido_norm = (contenido or "").strip()
 
+        # Si el contingut està buit → eliminar informe si existeix
+        if contenido_norm == "":
+            try:
+                DV.upsert_informe_individual(
+                    fecha_iso=fecha_iso,
+                    alumno=alumno,
+                    alias=alias,
+                    contenido=""  # senyal perquè l'upsert faci delete
+                )
+            except Exception as e:
+                st.error(f"Error eliminant l'informe individual a Dataverse: {e}")
+                return
+
+            st.success("🗑️ Informe individual eliminat per aquesta data.")
+            st.session_state["forzar_edicion_individual"] = False
+            st.session_state["confirmar_salir_individual"] = False
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
+            return
+
+        # Si hi ha contingut → guardar normalment
         try:
             DV.upsert_informe_individual(
                 fecha_iso=fecha_iso,
                 alumno=alumno,
                 alias=alias,
-                contenido=contenido or "",
+                contenido=contenido_norm,
             )
         except Exception as e:
             st.error(f"Error desant l'informe individual a Dataverse: {e}")
             return
 
         data_text = fecha_sel.strftime("%d/%m/%Y")
-        pdf = generar_pdf_individual(alumno, contenido, fecha_iso)
+        pdf = generar_pdf_individual(alumno, contenido_norm, fecha_iso)
 
         if enviar:
             enviar_correo(
