@@ -1253,21 +1253,6 @@ def formulario_informe_general():
     fecha_mostrar = fecha_sel.strftime("%d/%m/%Y")
     st.markdown(f"**Data seleccionada:** {fecha_mostrar}")
 
-    # 🔹 Llista d'alumnes amb informe individual per a aquesta data (vista en pantalla)
-    try:
-        alumnos_ind_dia = DV.get_alumnos_con_informe_en_fecha(fecha_iso)
-    except Exception as e:
-        st.error(f"Error llegint informes individuals del dia des de Dataverse: {e}")
-        alumnos_ind_dia = []
-
-    with st.expander("📑 Informes individuals d'aquest dia", expanded=False):
-        if alumnos_ind_dia:
-            st.caption("Aquest és el llistat d'esportistes que tenen informe individual per aquesta data:")
-            for a in alumnos_ind_dia:
-                st.markdown(f"- {a}")
-        else:
-            st.caption("Per ara no hi ha informes individuals registrats per aquesta data.")
-
     # --- Carrega des de Dataverse quan canvia la data ---
     if st.session_state["fecha_cargada"] != fecha_iso:
         st.session_state["fecha_cargada"] = fecha_iso
@@ -1434,6 +1419,21 @@ def formulario_informe_general():
                 taxis_df["Hora"] = taxis_df["Hora"].apply(normalizar_hora)
 
             st.session_state["taxis_df"] = taxis_df
+
+        # --- Informes individuals del dia (al final del formulari, abans de guardar) ---
+        with st.expander("📑 Informes individuals d'aquest dia", expanded=False):
+            try:
+                alumnos_ind_dia = DV.get_alumnos_con_informe_en_fecha(fecha_iso)
+            except Exception as e:
+                st.error(f"Error llegint informes individuals del dia des de Dataverse: {e}")
+                alumnos_ind_dia = []
+
+            if alumnos_ind_dia:
+                st.caption("Esportistes que tenen informe individual per aquesta data:")
+                for a in alumnos_ind_dia:
+                    st.markdown(f"- {a}")
+            else:
+                st.caption("Per ara no hi ha informes individuals registrats per aquesta data.")
 
         # Botones de guardar
         col_guardar_1, col_guardar_2 = st.columns(2)
