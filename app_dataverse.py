@@ -351,7 +351,7 @@ class DataverseClient:
             self.post(ENTITY_TAXIS, payload)
 
     # =========================================================
-    # 🔶 INFORMES INDIVIDUALS – tabla cr143_informeindividual
+    # 🔶 INFORMES INDIVIDUALS – taula cr143_informeindividuals
     # =========================================================
     def get_informe_individual(self, fecha_iso: str, alumno: str) -> dict | None:
         """
@@ -367,7 +367,8 @@ class DataverseClient:
             return None
         rec = data["value"][0]
         return {
-            "id": rec.get("cr143_informeindividualid"),
+            # ⚠️ Clau primària CORRECTA amb la “s”
+            "id": rec.get("cr143_informeindividualsid"),
             "contenido": rec.get("cr143_congingut") or "",
         }
 
@@ -380,28 +381,16 @@ class DataverseClient:
     ) -> str | None:
         """
         Crea o actualiza un informe individual (fecha, alumno).
-        Si el contenido llega vacío (después de strip) y ya existe registro,
-        se elimina el informe en lugar de dejarlo en blanco.
         """
         existente = self.get_informe_individual(fecha_iso, alumno)
-        contenido_norm = (contenido or "").strip()
 
-        # Si no hi ha contingut i existeix registre → ELIMINAR
-        if contenido_norm == "":
-            if existente and existente.get("id"):
-                rec_id = existente["id"]
-                self.delete(f"{ENTITY_INDIV}({rec_id})")
-            # Si no existia, no cream res
-            return None
-
-        # Si hi ha contingut → crear/actualitzar normalment
         fecha_date = datetime.strptime(fecha_iso, "%Y-%m-%d").date().isoformat()
         payload = {
             "cr143_fechainforme": fecha_date,
             "cr143_codigofecha": fecha_iso,
             "cr143_alumne": alumno,
             "cr143_alias": alias or "",
-            "cr143_congingut": contenido_norm,
+            "cr143_congingut": contenido or "",
         }
 
         if existente and existente.get("id"):
@@ -414,7 +403,6 @@ class DataverseClient:
             if location and "(" in location and ")" in location:
                 return location.split("(")[1].split(")")[0]
             return None
-
 
     def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, str]]:
         """
