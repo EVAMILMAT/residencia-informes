@@ -1540,164 +1540,188 @@ def formulario_informe_general():
                 st.rerun()
 
         
-# -------------------------------------------------------------------
-# BLOQUE 8 — FORMULARIO INFORME INDIVIDUAL (Dataverse)
-# -------------------------------------------------------------------
+# app_dataverse.py – Bloque 8
+# -----------------------
+# Formulari Informe Individual (Dataverse)
+# -----------------------
 
 def formulario_informe_individual():
-    st.header("📝 Introduir informe individual")
+    st.header("👤 Introduir informe individual")
 
-    # Assegurar que els alumnes estan carregats
-    if not ALUMNOS:
-        cargar_alumnos_desde_dataverse()
+    # Control d'edició
+    if "forzar_edicion_individual" not in st.session_state:
+        st.session_state["forzar_edicion_individual"] = False
+    if "alumno_actual_informe" not in st.session_state:
+        st.session_state["alumno_actual_informe"] = ""
 
-    # -----------------------
-    # SELECCIÓ DE DATA I ALUMNE
-    # -----------------------
-
-    fecha_sel = st.date_input(
-        "Data de l'informe", 
-        value=date.today(), 
-        key="fecha_individual"
-    )
+    # Selecció de data
+    fecha_sel = st.date_input("Data de l'informe", value=date.today(), key="fecha_individual")
     fecha_iso = fecha_sel.isoformat()
+
+    # Data en format dd/mm/aaaa
     fecha_mostrar = fecha_sel.strftime("%d/%m/%Y")
+    st.markdown(f"**Data seleccionada:** {fecha_mostrar}")
 
+    # Llista d'alumnes amb opció en blanc
     alumno_lista = [""] + ALUMNOS
-    alumno = st.selectbox("Seleccionar esportista", alumno_lista, index=0)
+    alumno = st.selectbox("Alumne", alumno_lista, index=0)
 
-    if not alumno:
-        st.info("Seleccionau un esportista per iniciar l'informe.")
-        if st.button("🏠 Tornar al menú"):
-            st.session_state["vista_actual"] = "menu"
-            st.rerun()
-        return
+    # Si canviem d'alumne, sortim del mode edició forçada
+    if alumno != st.session_state["alumno_actual_informe"]:
+        st.session_state["alumno_actual_informe"] = alumno
+        st.session_state["forzar_edicion_individual"] = False
 
-    # -------------------------------------------------------
-    # CARREGAR INFORME INDIVIDUAL SI JA EXISTEIX AL DATAVERSE
-    # -------------------------------------------------------
+    # ----------------------------------------------------
+    # Comprovar si ja existeix informe (Dataverse) i carregar contingut
+    # ----------------------------------------------------
+    contenido_inicial = ""
+    tiene_informe = False
 
-    try:
-        informe_exist = DV.get_informe_individual(fecha_iso, alumno)
-    except Exception as e:
-        st.error(f"Error obtenint informe individual de Dataverse: {e}")
-        informe_exist = None
+    if alumno:
+        try:
+            rec = DV.get_informe_individual(fecha_iso, alumno)
+        except Exception as e:
+            st.error(f"Error llegint informe individual des de Dataverse: {e}")
+            rec = None
 
-    if informe_exist:
-        contingut_inicial = informe_exist.get("contenido") or ""
-        bloqueado = True
-    else:
-        contingut_inicial = ""
-        bloqueado = False
+        if rec:
+            tiene_informe = True
+            contenido_inicial = rec.get("contenido", "") or ""
 
-    # -----------------------
-    # CONSULTA D'ÀLIES
-    # -----------------------
+    bloqueado = tiene_informe and not st.session_state["forzar_edicion_individual"]
 
-    with st.expander("👀 Veure àlies disponibles (@)", expanded=False):
-        df_alias = pd.DataFrame(
-            [{"Esportista": n, "Àlies": ALIAS_DEPORTISTAS.get(n, "")} for n in ALUMNOS]
-        )
-        st.dataframe(df_alias, use_container_width=True, hide_index=True)
-
-    # -----------------------
-    # MISSATGE SI L'INFORME ESTÀ BLOQUEJAT
-    # -----------------------
-
-    if bloqueado:
-        st.info("🔒 Aquest informe individual ja està desat. Podeu editar-lo fent clic al botó següent.")
+    # Missatge si l'informe existeix i està bloquejat
+    if tiene_informe and bloqueado:
+        st.info("🔒 Aquest informe ja existeix i està bloquejat per a l'edició.")
         if st.button("✏️ Editar informe existent"):
-            bloqueado = False
+            st.session_state["forzar_edicion_individual"] = True
+            st.rerun()
 
-    # -----------------------
-    # FORMULARI PRINCIPAL
-    # -----------------------
+    # Camp de contingut (valor actual del widget)
+    contenido = st.text_area(
+        "Contingut de l'informe",
+        value=contenido_inicial,
+        height=150,
+        disabled=bloqueado
+    )
 
-    with st.form("form_informe_individual", clear_on_submit=False):
-        contenido = st.text_area(
-            f"Contingut de l'informe per a {alumno}",
-            value=contingut_inicial,
-            height=200,
-            disabled=bloqueado
-        )
+    # -----------------------------------------
+    # Funció interna per desar / eliminar i tornar al menú
+    # -----------------------------------------
+    def guardar_i_tornar(enviar=True):
+        # Validació: alumne obligatori
+        if not alumno:
+            st.warning("⚠️ Has de seleccionar un alumne abans de desar l'informe.")
+            return
 
-        col1, col2 = st.columns(2)
-        with col1:
-            enviar = st.form_submit_button("💾 Desar i enviar", disabled=bloqueado)
-        with col2:
-            sense_enviar = st.form_submit_button("💾 Desar sense enviar", disabled=bloqueado)
-
-    # -----------------------
-    # FUNCIÓ PER DESAR / ELIMINAR
-    # -----------------------
-
-    def guardar_i_tornar(enviar_correo_bool=True):
         alias = ALIAS_DEPORTISTAS.get(alumno) or generar_alias(alumno)
         contenido_norm = (contenido or "").strip()
 
-        # 🔥 SI EL CONTINGUT QUEDA BUID → ELIMINAR INFORME
+        # 🔥 Si el contingut està buit → eliminar informe si existeix
         if contenido_norm == "":
             try:
-                DV.upsert_informe_individual(
-                    fecha_iso=fecha_iso,
-                    alumno=alumno,
-                    alias=alias,
-                    contenido=""   # senyal per eliminar
-                )
+                rec_exist = DV.get_informe_individual(fecha_iso, alumno)
             except Exception as e:
-                st.error(f"Error eliminant informe individual a Dataverse: {e}")
+                st.error(f"Error comprovant l'informe individual a Dataverse: {e}")
                 return
 
+            if rec_exist and rec_exist.get("id"):
+                try:
+                    DV.delete(f"{ENTITY_INDIV}({rec_exist['id']})")
+                except Exception as e:
+                    st.error(f"Error eliminant l'informe individual a Dataverse: {e}")
+                    return
+
             st.success(f"🗑️ Informe individual eliminat per al dia {fecha_mostrar}.")
+            st.session_state["forzar_edicion_individual"] = False
+            st.session_state["confirmar_salir_individual"] = False
             st.session_state["vista_actual"] = "menu"
             st.rerun()
             return
 
-        # 🔄 GUARDAR O ACTUALITZAR
+        # ✅ Si hi ha contingut → crear/actualitzar normalment
         try:
             DV.upsert_informe_individual(
                 fecha_iso=fecha_iso,
                 alumno=alumno,
                 alias=alias,
-                contenido=contenido_norm
+                contenido=contenido_norm,
             )
         except Exception as e:
             st.error(f"Error desant l'informe individual a Dataverse: {e}")
             return
 
-        # GENERAR PDF
+        data_text = fecha_sel.strftime("%d/%m/%Y")
         pdf = generar_pdf_individual(alumno, contenido_norm, fecha_iso)
 
-        if enviar_correo_bool:
+        if enviar:
             enviar_correo(
-                f"Informe individual - {alumno} - {fecha_mostrar}",
-                f"Adjunt informe individual de {alumno} ({fecha_mostrar})",
+                f"Informe individual - {alumno} - {data_text}",
+                f"Adjunt informe individual de {alumno} ({data_text})",
                 [pdf]
             )
-            st.success("✅ Informe individual desat i enviat per correu.")
+            st.success(f"✅ Informe individual desat a Dataverse i enviat: {pdf}")
         else:
-            st.success("✅ Informe individual desat a Dataverse (sense enviar).")
+            st.success(f"✅ Informe individual desat a Dataverse (sense enviar correu): {pdf}")
 
+        st.session_state["forzar_edicion_individual"] = False
+        st.session_state["confirmar_salir_individual"] = False
         st.session_state["vista_actual"] = "menu"
         st.rerun()
 
-    # -----------------------
-    # EXECUCIÓ DESAR
-    # -----------------------
+    # ================================
+    # BOTONS PRINCIPALS DE DESAR
+    # ================================
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        if st.button("💾 Desar i enviar informe", disabled=bloqueado):
+            guardar_i_tornar(enviar=True)
+    with col_b2:
+        if st.button("💾 Desar sense enviar", disabled=bloqueado):
+            guardar_i_tornar(enviar=False)
 
-    if enviar:
-        guardar_i_tornar(enviar_correo_bool=True)
+    # ================================
+    # PROTECCIÓ SORTIDA SENSE DESAR
+    # ================================
+    tiene_datos = (
+        (alumno is not None and alumno != "") or
+        (contenido is not None and contenido.strip() != "")
+    )
 
-    if sense_enviar:
-        guardar_i_tornar(enviar_correo_bool=False)
+    if st.session_state.get("confirmar_salir_individual", False):
+        st.warning("⚠ Hi ha canvis sense desar. Vols desar l'informe abans de sortir?")
 
-    # -----------------------
-    # BOTÓ TORNAR
-    # -----------------------
+        col1, col2, col3 = st.columns(3)
 
-    if st.button("🏠 Tornar al menú", key="volver_menu_individual"):
-        st.session_state["vista_actual"] = "menu"
-        st.rerun()
+        # Desar i sortir
+        with col1:
+            if st.button("💾 Desar i tornar al menú", key="confirm_guardar_sortir_individual"):
+                guardar_i_tornar(enviar=True)
+
+        # Sortir sense desar
+        with col2:
+            if st.button("Sortir sense desar", key="sortir_sense_desar_individual"):
+                st.session_state["confirmar_salir_individual"] = False
+                st.session_state["forzar_edicion_individual"] = False
+                st.session_state["vista_actual"] = "menu"
+                st.rerun()
+
+        # Cancel·lar
+        with col3:
+            if st.button("Cancel·lar", key="cancelar_sortida_individual"):
+                st.session_state["confirmar_salir_individual"] = False
+                st.rerun()
+
+    else:
+        # Botó normal de tornar a l'inici
+        if st.button("🏠 Tornar a l'inici", key="volver_inicio_individual"):
+            # Només demanam confirmació si hi ha dades i l'informe no està bloquejat
+            if tiene_datos and not bloqueado:
+                st.session_state["confirmar_salir_individual"] = True
+                st.rerun()
+            else:
+                st.session_state["vista_actual"] = "menu"
+                st.rerun()
 
 # app_dataverse.py - Bloque 9
 # -----------------------
