@@ -1520,6 +1520,10 @@ def formulario_informe_general():
 def formulario_informe_individual():
     st.header("👤 Introduir informe individual")
 
+    # 👇 NUEVO: asegurar que la llista d'alumnes està carregada
+    if not ALUMNOS:
+        cargar_alumnos_desde_dataverse()
+
     # Control d'edició
     if "forzar_edicion_individual" not in st.session_state:
         st.session_state["forzar_edicion_individual"] = False
