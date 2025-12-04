@@ -2225,18 +2225,19 @@ def generar_pdf_historico_general(desde, hasta):
         elements.append(Paragraph("<b>Pícnics pel dia següent:</b>", estilo_titulo))
         elements.append(Paragraph((temas or '—').replace("\n", "<br/>"), estilo_texto))
 
+        # Taxis associats a aquest informe, amb data servei en dd/mm/yyyy
         if taxis_list:
-            data = [["Data", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
+            data = [["Data servei", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
 
             for t in taxis_list:
                 fecha_raw = t.get("Fecha", "")
                 try:
-                    fecha_raw = datetime.strptime(fecha_raw, "%Y-%m-%d").strftime("%d/%m/%Y")
+                    fecha_servicio_mostrar = datetime.strptime(fecha_raw, "%Y-%m-%d").strftime("%d/%m/%Y")
                 except Exception:
-                    pass
+                    fecha_servicio_mostrar = fecha_raw
 
                 data.append([
-                    fecha_raw,
+                    fecha_servicio_mostrar,
                     t.get("Hora", ""),
                     t.get("Recogida", ""),
                     t.get("Destino", ""),
@@ -2292,7 +2293,13 @@ def _recopilar_taxis_en_rang(desde, hasta):
             fecha_inf_str = fecha_informe_iso
 
         for t in taxis_list:
-            data_servei = t.get("Fecha", "") or ""
+            # Data servei en dd/mm/yyyy
+            fecha_raw = t.get("Fecha", "") or ""
+            try:
+                fecha_servicio_str = datetime.strptime(fecha_raw, "%Y-%m-%d").strftime("%d/%m/%Y")
+            except Exception:
+                fecha_servicio_str = fecha_raw
+
             hora = t.get("Hora", "") or ""
             recollida = t.get("Recogida", "") or ""
             desti = t.get("Destino", "") or ""
@@ -2301,141 +2308,7 @@ def _recopilar_taxis_en_rang(desde, hasta):
 
             filas.append([
                 fecha_inf_str,
-                data_servei,
-                hora,
-                recollida,
-                desti,
-                esportistes,
-                observacions
-            ])
-
-    return filas
-
-
-def generar_pdf_historico_taxis(desde, hasta):
-    filas = _recopilar_taxis_en_rang(desde, hasta)
-    if not filas:
-        return None
-
-    fname = os.path.join(
-        PDFS_DIR,
-        f"historico_taxis_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
-    )
-
-    doc = SimpleDocTemplate(
-        fname,
-        pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm
-    )
-    elements = []
-
-    estilo_titulo = ParagraphStyle(
-        name="TituloTaxis",
-        fontName="Helvetica-Bold",
-        fontSize=16,
-        alignment=TA_CENTER,
-        spaceAfter=8
-    )
-    estilo_sub = ParagraphStyle(
-        name="SubTaxis",
-        fontName="Helvetica",
-        fontSize=12,
-        alignment=TA_CENTER,
-        spaceAfter=12
-    )
-
-    elements.append(Paragraph("Residència Reina Sofia", estilo_titulo))
-    elements.append(Paragraph(
-        f"Històric de serveis de taxi ({desde.strftime('%d/%m/%Y')} - {hasta.strftime('%d/%m/%Y')})",
-        estilo_sub
-    ))
-    elements.append(Spacer(1, 8))
-
-    data = [["Data informe", "Data servei", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
-    data.extend(filas)
-
-    table = Table(data, colWidths=[2.5*cm, 2.5*cm, 2*cm, 3*cm, 3*cm, 3*cm, 3*cm])
-    table.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-    ]))
-
-    elements.append(table)
-    doc.build(elements)
-    return fname
-
-
-def obtener_historico_taxis_df(desde, hasta):
-    filas = _recopilar_taxis_en_rang(desde, hasta)
-    if not filas:
-        return None
-
-    columnas = [
-        "Data informe",
-        "Data servei",
-        "Hora",
-        "Recollida",
-        "Destí",
-        "Esportistes",
-        "Observacions"
-    ]
-    df = pd.DataFrame(filas, columns=columnas)
-    return df
-
-
-# =====================================================
-#   HISTÒRIC TAXIS (PDF + DataFrame) – Dataverse
-# =====================================================
-
-def _recopilar_taxis_en_rang(desde, hasta):
-    """
-    Retorna una llista de files amb tots els taxis en el rang de dates (Dataverse).
-    Cada fila és [data_informe, data_servei, hora, recollida, destí, esportistes, observacions]
-    """
-    desde_iso = desde.strftime("%Y-%m-%d")
-    hasta_iso = hasta.strftime("%Y-%m-%d")
-
-    try:
-        informes = DV.get_informes_generales_rango(desde_iso, hasta_iso)
-    except Exception as e:
-        st.error(f"Error llegint informes generals per a taxis de Dataverse: {e}")
-        informes = []
-
-    filas = []
-
-    for rec in informes:
-        fecha_informe_iso = rec.get("fecha") or ""
-        informe_id = rec.get("id")
-
-        try:
-            taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
-        except Exception as e:
-            st.error(f"Error llegint taxis de Dataverse: {e}")
-            taxis_list = []
-
-        try:
-            fecha_inf_dt = datetime.strptime(fecha_informe_iso, "%Y-%m-%d")
-            fecha_inf_str = fecha_inf_dt.strftime("%d/%m/%Y")
-        except Exception:
-            fecha_inf_str = fecha_informe_iso
-
-        for t in taxis_list:
-            data_servei = t.get("Fecha", "") or ""
-            hora = t.get("Hora", "") or ""
-            recollida = t.get("Recogida", "") or ""
-            desti = t.get("Destino", "") or ""
-            esportistes = t.get("Deportistas", "") or ""
-            observacions = t.get("Observaciones", "") or ""
-
-            filas.append([
-                fecha_inf_str,
-                data_servei,
+                fecha_servicio_str,
                 hora,
                 recollida,
                 desti,
