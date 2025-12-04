@@ -1735,7 +1735,13 @@ def hay_mencion_de(alumno, texto):
 def consultar_informe_individual():
     st.header("📄 Consultar informació d'un esportista")
 
-    alumno = st.selectbox("Seleccionar esportista", ALUMNOS)
+    # Asegurar que la lista de alumnos está cargada
+    if not ALUMNOS:
+        cargar_alumnos_desde_dataverse()
+
+    # Selector de alumno con opción en blanco
+    alumno_lista = [""] + ALUMNOS
+    alumno = st.selectbox("Seleccionar esportista", alumno_lista, index=0)
 
     tipo = st.radio(
         "Tipus de consulta",
