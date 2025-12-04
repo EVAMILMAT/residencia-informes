@@ -82,19 +82,16 @@ ENTITY_TAXIS = DV_CFG["taxis_entity_set"]                # p.ej. "cr143_taxis"
 ENTITY_INDIV = DV_CFG["informes_ind_entity_set"]         # p.ej. "cr143_informeindividuals"
 ENTITY_USUARIOS = DV_CFG["usuarios_entity_set"]          # p.ej. "cr143_usuarisaplicacios"
 ENTITY_ALUMNOS = DV_CFG["alumnos_entity_set"]            # p.ej. "cr143_esportistas"
+
 # Camp d'usuari per fer login i camp de nom visible
-USUARIOS_LOGIN_FIELD = "cr143_nomusuariregistre"   # usuari de login (minúscules, el que poses a secrets)
-USUARIOS_NOMBRE_FIELD = "cr143_nomusuari"          # nom complet a mostrar als informes
+# - USU_LOGIN_FIELD: "Nom usuari registre" (login en minúscules, el que poses a secrets)
+# - USU_NAME_FIELD : "Nom usuari" (nom complet que volem que surti als informes)
+USU_LOGIN_FIELD = "cr143_nomusuariregistre"
+USU_NAME_FIELD  = "cr143_nomusuari"
 
-
-
-# 👇 CAMPO DE LOGIN y CAMPO DE NOMBRE VISIBLE
-# Ajusta USU_LOGIN_FIELD al nombre lógico real de "Nom usuari registre"
-USU_LOGIN_FIELD = "cr143_nomusuariregistre"   # ← CAMBIA si en Dataverse se llama distinto
-USU_NAME_FIELD  = "cr143_nomusuari"           # "Nom usuari" (nombre completo para informes)
-
-ALUMNOS_NAME_FIELD = "cr143_nomcomplet"   # normalment és el nom primari
-ALUMNOS_ALIAS_FIELD = "cr143_alias"       # CAMP d'àlies
+# Camps d'esportistes
+ALUMNOS_NAME_FIELD  = "cr143_nomcomplet"   # nom complet de l'esportista
+ALUMNOS_ALIAS_FIELD = "cr143_alias"        # columna d'àlies (nom lògic confirmat)
 
 
 class DataverseClient:
@@ -180,7 +177,7 @@ class DataverseClient:
     def get_usuario_hash(self, usuario_login: str) -> str | None:
         """
         Devuelve el hash de contraseña almacenado en Dataverse para un usuario.
-        Busca por 'Nom usuari registre' (USU_LOGIN_FIELD) y lee cr143_passwordhash.
+        Busca por 'Nom usuari registre' (USU_LOGIN_FIELD) i llegeix cr143_passwordhash.
         """
         rec = self._get_usuario_registro(usuario_login)
         if not rec:
@@ -190,30 +187,30 @@ class DataverseClient:
     def set_usuario_hash(self, usuario_login: str, password_hash: str):
         """
         Crea o actualiza el hash de contraseña de un usuario en Dataverse.
-        Se identifica por 'Nom usuari registre' (USU_LOGIN_FIELD).
+        S'identifica per 'Nom usuari registre' (USU_LOGIN_FIELD).
         """
         usuario_esc = usuario_login.replace("'", "''")
-        filtro = f"{USUARIOS_LOGIN_FIELD} eq '{usuario_esc}'"
+        filtro = f"{USU_LOGIN_FIELD} eq '{usuario_esc}'"
         endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
         data = self.get(endpoint)
 
         payload = {
-            USU_LOGIN_FIELD: usuario_login,          # valor para 'Nom usuari registre'
+            USU_LOGIN_FIELD: usuario_login,      # valor per a 'Nom usuari registre'
             "cr143_passwordhash": password_hash,
         }
 
         if data and data.get("value"):
-            # Update (PATCH) sobre el registro existente
+            # Update (PATCH) sobre el registre existent
             rec_id = data["value"][0]["cr143_usuarisaplicacioid"]
             self.patch(f"{ENTITY_USUARIOS}({rec_id})", payload)
         else:
-            # Create (POST) – crea un registro con login + passwordhash
+            # Create (POST) – crea un registre amb login + passwordhash
             self.post(ENTITY_USUARIOS, payload)
 
     def get_usuario_nombre_visible(self, usuario_login: str) -> str | None:
         """
-        A partir del login (Nom usuari registre) devuelve el 'Nom usuari'
-        que queremos mostrar como cuidador en los informes.
+        A partir del login (Nom usuari registre) retorna el 'Nom usuari'
+        que volem mostrar com a cuidador als informes.
         """
         rec = self._get_usuario_registro(usuario_login)
         if not rec:
@@ -263,7 +260,7 @@ class DataverseClient:
         payload = {
             "cr143_fechainforme": fecha_date,
             "cr143_codigofecha": fecha_iso,
-            "cr143_cuidador": cuidador or "",          # aquí se guarda el NOM USUARI (nombre visible)
+            "cr143_cuidador": cuidador or "",          # aquí es guarda el NOM USUARI (nom visible)
             "cr143_informedeldia": entradas or "",
             "cr143_notesdireccio": mantenimiento or "",
             "cr143_picnics": temas or "",
@@ -505,7 +502,7 @@ class DataverseClient:
             f"{ENTITY_INFORMES}"
             f"?$filter={filtro}"
             f"&$orderby=cr143_codigofecha asc"
-            f"&$select={select}"
+            f"&$select={select}
         )
 
         data = self.get(endpoint)
@@ -619,7 +616,10 @@ def cargar_cuidadores_desde_dataverse():
     global CUIDADORES, MAPA_USUARIO_A_CUIDADOR
 
     try:
-        filas = DV.get_usuarios_cuidadores()
+        # Si més endavant definim un mètode específic a DV, es podria usar aquí.
+        # De moment es fa una lectura simple de la taula.
+        data = DV.get(ENTITY_USUARIOS)
+        filas = data.get("value", []) if data else []
     except Exception as e:
         st.error(f"No s'han pogut carregar els cuidadors des de Dataverse: {e}")
         filas = []
@@ -628,8 +628,8 @@ def cargar_cuidadores_desde_dataverse():
     mapa: dict[str, str] = {}
 
     for fila in filas:
-        usu = fila.get("usuario", "").strip()
-        nom = fila.get("cuidador", "").strip()
+        usu = (fila.get(USU_LOGIN_FIELD) or "").strip()
+        nom = (fila.get(USU_NAME_FIELD) or "").strip()
         if not usu or not nom:
             continue
         noms.append(nom)
@@ -754,6 +754,7 @@ def cambiar_contraseña():
     if st.button("🏠 Tornar al menú", key="volver_menu_cambiar_contraseña"):
         st.session_state["vista_actual"] = "menu"
         st.rerun()
+
 
 # app.py - Bloque 3
 
@@ -1195,31 +1196,19 @@ def comprobar_sobrescribir_individual(fecha_iso: str, alumno: str) -> bool:
 def obtener_cuidador_para_usuario_session() -> str:
     """
     A partir de l'usuari amb el qual s'ha fet login (st.session_state['usuario']),
-    obté el nom de cuidador/a que s'ha de guardar a l'informe.
+    obté el nom de cuidador/a (Nom usuari) que s'ha de guardar a l'informe.
 
-    - El login ve de USUARIOS_LOGIN_FIELD (cr143_nomusuariregistre)
-    - El nom visible ve de USUARIOS_NOMBRE_FIELD (cr143_nomusuari)
+    - El login és el camp USU_LOGIN_FIELD (cr143_nomusuariregistre)
+    - El nom visible ve de USU_NAME_FIELD (cr143_nomusuari)
     """
     usuario_login = st.session_state.get("usuario", "")
     if not usuario_login:
         return ""
 
     try:
-        usuario_esc = usuario_login.replace("'", "''")
-        filtro = f"{USUARIOS_LOGIN_FIELD} eq '{usuario_esc}'"
-        endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
-        data = DV.get(endpoint)
-
-        if not data or not data.get("value"):
-            # Si no trobam res, com a mínim tornam el login
-            return usuario_login
-
-        rec = data["value"][0]
-
-        # Nom visible (complet) per als informes
-        nombre_visible = (rec.get(USUARIOS_NOMBRE_FIELD) or "").strip()
+        nombre_visible = DV.get_usuario_nombre_visible(usuario_login)
+        # Si per qualsevol motiu no hi ha nom visible, fem servir el login com a últim recurs
         return nombre_visible or usuario_login
-
     except Exception as e:
         st.error(f"No s'ha pogut determinar el cuidador a partir de l'usuari: {e}")
         return usuario_login
