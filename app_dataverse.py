@@ -482,7 +482,7 @@ class DataverseClient:
                 alumnes.append(nom)
         return alumnes
 
-    def get_informes_generales_rango(self, desde_iso: str, hasta_iso: str) -> list[dict]:
+       def get_informes_generales_rango(self, desde_iso: str, hasta_iso: str) -> list[dict]:
         """
         Retorna una llista de dicts d'informes generals entre dues dates (YYYY-MM-DD).
         """
@@ -502,7 +502,7 @@ class DataverseClient:
             f"{ENTITY_INFORMES}"
             f"?$filter={filtro}"
             f"&$orderby=cr143_codigofecha asc"
-            f"&$select={select}
+            f"&$select={select}"
         )
 
         data = self.get(endpoint)
