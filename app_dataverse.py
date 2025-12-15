@@ -486,7 +486,41 @@ def replace_taxis_for_informe(self, informe_id: str, fecha_iso: str, taxis_list:
             res.append({"nombre": nombre, "alias": alias})
 
         return res
+    # =========================================================
+    # 🔶 ALUMNOS – taula cr143_esportistas (Esportistes residència)
+    # =========================================================
+    def get_alumnos(self) -> list[dict]:
+        """
+        Devuelve una lista de dict:
+        [{ "nombre": <nom complet>, "alias": <alias> }, ...]
+        usando la taula d'esportistes.
 
+        Usa ALUMNOS_NAME_FIELD como nom complet
+        y ALUMNOS_ALIAS_FIELD como camp d'àlies.
+        """
+        data = self.get(ENTITY_ALUMNOS)
+        if not data or "value" not in data:
+            return []
+
+        rows = data["value"]
+        if not rows:
+            return []
+
+        res: list[dict] = []
+        for rec in rows:
+            nombre = (rec.get(ALUMNOS_NAME_FIELD) or "").strip()
+            if not nombre:
+                continue
+
+            alias = ""
+            if ALUMNOS_ALIAS_FIELD:
+                alias = (rec.get(ALUMNOS_ALIAS_FIELD) or "").strip()
+
+            res.append({"nombre": nombre, "alias": alias})
+
+        return res
+
+    
     # =========================================================
     # 🔶 HELPERS EXTRA PARA HISTÓRICOS Y CONSULTAS
     # =========================================================
