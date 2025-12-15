@@ -2153,7 +2153,6 @@ def _hash_password(pw: str) -> str:
 def login():
     st.header("🔐 Accés a l'aplicació")
 
-    # Inicializar flags
     if "usuario_autenticado" not in st.session_state:
         st.session_state["usuario_autenticado"] = False
     if "usuario" not in st.session_state:
@@ -2162,25 +2161,22 @@ def login():
     usuario = st.text_input("Usuari", key="login_usuario").strip().lower()
     password = st.text_input("Contrasenya", type="password", key="login_password")
 
-    col1, col2 = st.columns(2)
+    if st.button("Entrar", use_container_width=True):
+        if not usuario or not password:
+            st.warning("Introdueix usuari i contrasenya.")
+            return
 
-    with col1:
-        if st.button("Entrar", use_container_width=True):
-            if not usuario or not password:
-                st.warning("Introdueix usuari i contrasenya.")
-                return
+        pw_hash_introducido = _hash_password(password)
 
-            try:
-                hash_guardado = DV.get_usuario_hash(usuario)
-            except Exception as e:
-                st.error(f"Error llegint usuari a Dataverse: {e}")
-                return
+        # 1) Intentar validar con Dataverse
+        try:
+            hash_guardado = DV.get_usuario_hash(usuario)
+        except Exception as e:
+            st.error(f"Error llegint usuari a Dataverse: {e}")
+            return
 
-            if not hash_guardado:
-                st.error("Usuari no existent o sense contrasenya configurada.")
-                return
-
-            if _hash_password(password) != hash_guardado:
+        if hash_guardado:
+            if pw_hash_introducido != hash_guardado:
                 st.error("Contrasenya incorrecta.")
                 return
 
@@ -2189,10 +2185,29 @@ def login():
             st.session_state["vista_actual"] = "menu"
             st.rerun()
 
-    with col2:
-        if st.button("Crear/Restablir contrasenya", use_container_width=True):
-            st.session_state["vista_actual"] = "cambiar_contraseña"
-            st.rerun()
+        # 2) Si no hay hash en Dataverse: fallback a secrets
+        auth_users = st.secrets.get("auth_users", {})
+        pw_secret = (auth_users.get(usuario) or "").strip()
+
+        if not pw_secret:
+            st.error("Usuari no existent o sense contrasenya configurada.")
+            return
+
+        if password != pw_secret:
+            st.error("Contrasenya incorrecta.")
+            return
+
+        # 3) Si valida por secrets, guardamos el hash en Dataverse (ya queda configurado)
+        try:
+            DV.set_usuario_hash(usuario, pw_hash_introducido)
+        except Exception as e:
+            st.warning(f"⚠️ Login correcte, però no s'ha pogut guardar el hash a Dataverse: {e}")
+
+        st.session_state["usuario_autenticado"] = True
+        st.session_state["usuario"] = usuario
+        st.session_state["vista_actual"] = "menu"
+        st.rerun()
+
 
 def logout():
     # Mantén lo mínimo; no borres secrets ni nada
