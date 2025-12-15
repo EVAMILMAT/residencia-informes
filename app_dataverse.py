@@ -257,13 +257,8 @@ class DataverseClient:
 
         taxis: list[dict] = []
         for rec in rows:
-            fecha_raw = rec.get("cr143_fecha")
-            fecha_txt = ""
-            if fecha_raw:
-                try:
-                    fecha_txt = datetime.fromisoformat(fecha_raw).date().strftime("%Y-%m-%d")
-                except Exception:
-                    fecha_txt = ""
+            fecha_txt = dv_date(rec.get("cr143_fecha"))
+
 
             taxis.append({
                 "Fecha": fecha_txt,
@@ -378,13 +373,7 @@ class DataverseClient:
 
         res: list[tuple[str, str]] = []
         for rec in rows:
-            fecha_raw = rec.get("cr143_fechainforme")
-            fecha_iso_out = ""
-            if fecha_raw:
-                try:
-                    fecha_iso_out = datetime.fromisoformat(fecha_raw).date().strftime("%Y-%m-%d")
-                except Exception:
-                    fecha_iso_out = ""
+           fecha_iso_out = dv_date(rec.get("cr143_fechainforme"))
             res.append((fecha_iso_out, rec.get("cr143_congingut") or ""))
         return res
 
@@ -456,7 +445,8 @@ class DataverseClient:
         res: list[dict] = []
         for rec in rows:
             fecha_raw = (rec.get("cr143_codigofecha") or "").strip()
-            fecha_iso_out = fecha_raw.split("T")[0] if fecha_raw else ""
+            fecha_iso_out = dv_date(rec.get("cr143_codigofecha"))
+
 
             res.append({
                 "id": rec.get("cr143_informegeneralid"),
@@ -489,7 +479,7 @@ class DataverseClient:
         res: list[dict] = []
         for rec in rows:
             fecha_raw = (rec.get("cr143_codigofecha") or "").strip()
-            fecha_iso_out = fecha_raw.split("T")[0] if fecha_raw else ""
+            fecha_iso_out = dv_date(rec.get("cr143_codigofecha")) if fecha_raw else ""
             res.append({
                 "id": rec.get("cr143_informegeneralid"),
                 "fecha": fecha_iso_out,
@@ -541,6 +531,37 @@ def cargar_alumnos_desde_dataverse():
 
 def dv_get_alumnos():
     return DV.get_alumnos()
+
+def dv_date(value: str) -> str:
+    """
+    Convierte cualquier fecha de Dataverse a formato dd/mm/yyyy.
+    Acepta:
+      - 2025-12-15
+      - 2025-12-15T00:00:00
+      - 2025-12-15T00:00:00Z
+    """
+    if not value:
+        return ""
+
+    v = value.strip()
+
+    # Dataverse suele devolver ...Z
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+
+    try:
+        return datetime.fromisoformat(v).date().strftime("%d/%m/%Y")
+    except Exception:
+        try:
+            return datetime.strptime(v[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+        except Exception:
+            return ""
+
+
+
+
+
+
 
 # app.py - Bloque 3
 
