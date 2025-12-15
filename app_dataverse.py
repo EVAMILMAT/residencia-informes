@@ -1539,610 +1539,131 @@ def formulario_informe_individual():
                 st.session_state["vista_actual"] = "menu"
                 st.rerun()
 
-# app_dataverse.py - Bloque 9
-# -----------------------
-# Consultes i Històrics (Dataverse)
-# -----------------------
+# =========================================================
+# BLOQUE 9 – AUTH: login / logout / cambiar contraseña (Dataverse)
+# =========================================================
 
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from reportlab.lib.styles import ParagraphStyle
-from datetime import datetime
-import re
-import os
-import json
-import pandas as pd
+import hashlib
 
-def _parse_fecha_any_to_ddmmyyyy(v: str) -> str:
-    v = (v or "").strip()
-    if not v:
-        return ""
-    # dd/mm/yyyy
-    if "/" in v:
+def _hash_password(pw: str) -> str:
+    return hashlib.sha256((pw or "").encode("utf-8")).hexdigest()
+
+
+def login():
+    st.header("🔐 Accés a l'aplicació")
+
+    if "usuario_autenticado" not in st.session_state:
+        st.session_state["usuario_autenticado"] = False
+    if "usuario" not in st.session_state:
+        st.session_state["usuario"] = ""
+
+    usuario = st.text_input("Usuari", key="login_usuario").strip().lower()
+    password = st.text_input("Contrasenya", type="password", key="login_password")
+
+    if st.button("Entrar", use_container_width=True):
+
+        if not usuario or not password:
+            st.warning("Introdueix usuari i contrasenya.")
+            return
+
+        pw_hash_introducido = _hash_password(password)
+
+        # -------------------------------------------------
+        # 1) Intentar validar contra Dataverse (si hi ha hash)
+        # -------------------------------------------------
         try:
-            return datetime.strptime(v, "%d/%m/%Y").strftime("%d/%m/%Y")
-        except Exception:
-            return v
-    # ISO
-    try:
-        return datetime.strptime(v[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
-    except Exception:
-        return v
-
-
-# =====================================================
-#   DETECCIÓ I EXTRACCIÓ DE MENCIONS
-# =====================================================
-
-def extraer_menciones_de(alumno, texto):
-    if not texto:
-        return []
-
-    alias = ALIAS_DEPORTISTAS.get(alumno, "")
-    alias_lower = alias.lower() if alias else ""
-    nombre_pila = alumno.split()[0].lower()
-
-    trozos = []
-    for linea in texto.splitlines():
-        linea_str = linea or ""
-        linea_lower = linea_str.lower()
-
-        te_alias = alias_lower and alias_lower in linea_lower
-        te_nom = f"@{nombre_pila}" in linea_lower
-
-        if te_alias or te_nom:
-            trozos.append(linea_str.strip())
-
-    return trozos
-
-
-def hay_mencion_de(alumno, texto):
-    return len(extraer_menciones_de(alumno, texto)) > 0
-
-
-# =====================================================
-#   CONSULTAR INFORME INDIVIDUAL I MENCIONS (Dataverse)
-# =====================================================
-
-def consultar_informe_individual():
-    st.header("📄 Consultar informació d'un esportista")
-
-    if not ALUMNOS:
-        cargar_alumnos_desde_dataverse()
-
-    alumno_lista = [""] + ALUMNOS
-    alumno = st.selectbox("Seleccionar esportista", alumno_lista, index=0)
-
-    tipo = st.radio(
-        "Tipus de consulta",
-        ["Informes individuals", "Mencions als informes generals"],
-        horizontal=True
-    )
-
-    if not alumno:
-        st.info("Seleccionau un esportista per consultar la informació.")
-        return
-
-    if tipo == "Informes individuals":
-        try:
-            registros = DV.get_informes_individuales_por_alumno(alumno)  # (ISO, contenido)
+            hash_guardado = DV.get_usuario_hash(usuario)
         except Exception as e:
-            st.error(f"Error llegint informes individuals de Dataverse: {e}")
-            registros = []
+            st.error(f"Error llegint usuari a Dataverse: {e}")
+            return
 
-        if not registros:
-            st.info("No hi ha informes individuals per aquest esportista.")
-        else:
-            for fecha_iso, contenido in registros:
-                fecha_mostrar = (
-                    datetime.strptime(fecha_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
-                    if fecha_iso else "—"
-                )
+        if hash_guardado:
+            if pw_hash_introducido != hash_guardado:
+                st.error("Contrasenya incorrecta.")
+                return
 
-                st.markdown(
-                    f"""
-                    <div style="border:1px solid #cccccc; border-radius:6px; padding:12px; margin-bottom:12px;">
-                        <strong>📅 {fecha_mostrar}</strong><br><br>
-                        <pre style="white-space:pre-wrap; margin:0;">{contenido or "—"}</pre>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-
-    else:
-        try:
-            informes = DV.get_informes_generales_todos()  # fecha ISO
-        except Exception as e:
-            st.error(f"Error llegint informes generals de Dataverse: {e}")
-            informes = []
-
-        menciones = []
-
-        for rec in informes:
-            fecha = rec.get("fecha") or ""  # ISO
-            cuidador = rec.get("cuidador") or ""
-            entradas = rec.get("entradas") or ""
-            mantenimiento = rec.get("mantenimiento") or ""
-            temas = rec.get("temas") or ""
-
-            campos = {}
-
-            frags_e = extraer_menciones_de(alumno, entradas)
-            if frags_e:
-                campos["Informe del dia"] = "\n".join(frags_e)
-
-            frags_m = extraer_menciones_de(alumno, mantenimiento)
-            if frags_m:
-                campos["Notes per direcció, manteniment i neteja"] = "\n".join(frags_m)
-
-            frags_t = extraer_menciones_de(alumno, temas)
-            if frags_t:
-                campos["Pícnics pel dia següent"] = "\n".join(frags_t)
-
-            if campos:
-                menciones.append((fecha, cuidador, campos))
-
-        if not menciones:
-            st.info("No hi ha mencions d'aquest esportista als informes generals.")
-        else:
-            for fecha_iso, cuidador, campos in menciones:
-                fecha_mostrar = (
-                    datetime.strptime(fecha_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
-                    if fecha_iso else "—"
-                )
-
-                st.markdown(f"### 📅 {fecha_mostrar} — 🧑‍💼 {cuidador or '—'}")
-
-                for titulo, contenido in campos.items():
-                    st.markdown(
-                        f"""
-                        <div style="border:1px solid #bbbbbb; border-radius:6px; padding:10px; margin-bottom:8px;">
-                            <strong>{titulo}</strong><br>
-                            <pre style="white-space:pre-wrap; margin:0;">{contenido or "—"}</pre>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-
-                st.divider()
-
-    if st.button("🏠 Tornar al menú", key="volver_menu_individual_consulta"):
-        st.session_state["vista_actual"] = "menu"
-        st.rerun()
-
-
-def consultar_informe_general():
-    st.header("🔎 Consultar informe general")
-
-    fecha_sel = st.date_input(
-        "Selecciona la data de l'informe",
-        value=date.today(),
-        key="fecha_consulta_general"
-    )
-    fecha_iso = fecha_sel.isoformat()
-    fecha_mostrar = fecha_sel.strftime("%d/%m/%Y")
-
-    st.markdown(f"**Data seleccionada:** {fecha_mostrar}")
-
-    try:
-        informe = DV.get_informe_general(fecha_iso)
-    except Exception as e:
-        st.error(f"Error llegint informe general des de Dataverse: {e}")
-        informe = None
-
-    if not informe:
-        st.info(f"No hi ha informe general guardat a Dataverse per a {fecha_mostrar}.")
-        if st.button("🏠 Tornar al menú", key="volver_menu_general_consulta_sense_informe"):
+            st.session_state["usuario_autenticado"] = True
+            st.session_state["usuario"] = usuario
             st.session_state["vista_actual"] = "menu"
             st.rerun()
-        return
 
-    cuidador = informe.get("cuidador") or ""
-    entradas = informe.get("entradas") or ""
-    mantenimiento = informe.get("mantenimiento") or ""
-    temas = informe.get("temas") or ""
-    informe_id = informe.get("id")
+        # -------------------------------------------------
+        # 2) Fallback a secrets.toml [auth]
+        # -------------------------------------------------
+        auth = st.secrets.get("auth", {})
+        pw_secret = (auth.get(usuario) or "").strip()
 
-    try:
-        taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
-    except Exception as e:
-        st.error(f"Error llegint taxis de Dataverse: {e}")
-        taxis_list = []
+        if not pw_secret:
+            st.error("Usuari no existent o sense contrasenya configurada.")
+            return
 
-    st.markdown(
-        f"""
-        <div style="border:1px solid #cccccc; border-radius:6px; padding:10px; margin-bottom:10px;">
-            <strong>Cuidador/a</strong><br>
-            {cuidador or "—"}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+        if password != pw_secret:
+            st.error("Contrasenya incorrecta.")
+            return
 
-    st.markdown(
-        f"""
-        <div style="border:1px solid #cccccc; border-radius:6px; padding:10px; margin-bottom:10px;">
-            <strong>Informe del dia</strong><br>
-            <pre style="white-space:pre-wrap; margin:0;">{entradas or "—"}</pre>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+        # -------------------------------------------------
+        # 3) Login OK → guardar hash a Dataverse
+        # -------------------------------------------------
+        try:
+            DV.set_usuario_hash(usuario, pw_hash_introducido)
+        except Exception as e:
+            st.warning(
+                "⚠️ Login correcte, però no s'ha pogut guardar el hash a Dataverse.\n"
+                f"{e}"
+            )
 
-    st.markdown(
-        f"""
-        <div style="border:1px solid #cccccc; border-radius:6px; padding:10px; margin-bottom:10px;">
-            <strong>Notes per direcció, manteniment i neteja</strong><br>
-            <pre style="white-space:pre-wrap; margin:0;">{mantenimiento or "—"}</pre>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        f"""
-        <div style="border:1px solid #cccccc; border-radius:6px; padding:10px; margin-bottom:10px;">
-            <strong>Pícnics pel dia següent</strong><br>
-            <pre style="white-space:pre-wrap; margin:0;">{temas or "—"}</pre>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    if taxis_list:
-        st.markdown(
-            """
-            <div style="border:1px solid #cccccc; border-radius:6px; padding:10px; margin-bottom:10px;">
-                <strong>Taxis</strong>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        st.table(pd.DataFrame(taxis_list))
-
-    if st.button("🏠 Tornar al menú", key="volver_menu_general_consulta"):
+        st.session_state["usuario_autenticado"] = True
+        st.session_state["usuario"] = usuario
         st.session_state["vista_actual"] = "menu"
         st.rerun()
 
 
-def generar_pdf_historico_individual(alumno, desde, hasta):
-    desde_iso = desde.strftime("%Y-%m-%d")
-    hasta_iso = hasta.strftime("%Y-%m-%d")
+def logout():
+    st.session_state["usuario_autenticado"] = False
+    st.session_state["usuario"] = ""
+    st.session_state["vista_actual"] = "menu"
 
-    fname = os.path.join(
-        PDFS_DIR,
-        f"historico_individual_{alumno.replace(' ','_')}_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
-    )
-    doc = SimpleDocTemplate(
-        fname,
-        pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm
-    )
-    elements = []
+    # limpiar campos sensibles
+    for k in ["login_password"]:
+        st.session_state.pop(k, None)
 
-    estilo_titulo = ParagraphStyle(name="Titulo", fontName="Helvetica-Bold",
-                                   fontSize=16, alignment=TA_CENTER, spaceAfter=6)
-    estilo_sub = ParagraphStyle(name="Sub", fontName="Helvetica",
-                                fontSize=12, alignment=TA_CENTER, spaceAfter=10)
-    estilo_fecha = ParagraphStyle(name="Fecha", fontName="Helvetica-Bold",
-                                  fontSize=13, spaceAfter=6)
-    estilo_titulo_bloque = ParagraphStyle(name="TituloBloque", fontName="Helvetica-Bold",
-                                          fontSize=12, spaceAfter=4)
-    estilo_texto = ParagraphStyle(name="Texto", fontName="Helvetica",
-                                  fontSize=10, leading=14)
-
-    try:
-        todos_ind = DV.get_informes_individuales_por_alumno(alumno)  # ISO
-    except Exception as e:
-        st.error(f"Error llegint informes individuals de Dataverse: {e}")
-        todos_ind = []
-
-    registros_ind = []
-    for fecha_iso_val, contenido in todos_ind:
-        if desde_iso <= fecha_iso_val <= hasta_iso:
-            registros_ind.append((fecha_iso_val, contenido))
-
-    try:
-        informes_gen = DV.get_informes_generales_rango(desde_iso, hasta_iso)  # fecha ISO
-    except Exception as e:
-        st.error(f"Error llegint informes generals de Dataverse: {e}")
-        informes_gen = []
-
-    menciones = []
-    for rec in informes_gen:
-        fecha = rec.get("fecha") or ""
-        cuidador = rec.get("cuidador") or ""
-        entradas = rec.get("entradas") or ""
-        mantenimiento = rec.get("mantenimiento") or ""
-        temas = rec.get("temas") or ""
-
-        campos = {}
-
-        frags_e = extraer_menciones_de(alumno, entradas)
-        if frags_e:
-            campos["Informe del dia"] = frags_e
-
-        frags_m = extraer_menciones_de(alumno, mantenimiento)
-        if frags_m:
-            campos["Notes per direcció, manteniment i neteja"] = frags_m
-
-        frags_t = extraer_menciones_de(alumno, temas)
-        if frags_t:
-            campos["Pícnics pel dia següent"] = frags_t
-
-        if campos:
-            menciones.append((fecha, cuidador, campos))
-
-    if not registros_ind and not menciones:
-        return None
-
-    elements.append(Paragraph("Residència Reina Sofia", estilo_titulo))
-    elements.append(Paragraph(f"Històric individual - {alumno}", estilo_sub))
-    elements.append(Spacer(1, 8))
-
-    if registros_ind:
-        elements.append(Paragraph("A) Informes individuals", estilo_titulo_bloque))
-        elements.append(Spacer(1, 6))
-
-        for fecha_iso_val, contenido in registros_ind:
-            fecha_mostrar = datetime.strptime(fecha_iso_val, "%Y-%m-%d").strftime("%d/%m/%Y")
-            elements.append(Paragraph(f"Informe del dia {fecha_mostrar}", estilo_fecha))
-            elements.append(Paragraph((contenido or "—").replace("\n", "<br/>"), estilo_texto))
-            elements.append(Spacer(1, 8))
-            elements.append(Paragraph("<hr/>", estilo_texto))
-            elements.append(Spacer(1, 4))
-
-    if menciones:
-        elements.append(Spacer(1, 10))
-        elements.append(Paragraph("B) Mencions als informes generals", estilo_titulo_bloque))
-        elements.append(Spacer(1, 6))
-
-        for fecha_iso_val, cuidador, campos in menciones:
-            fecha_mostrar = datetime.strptime(fecha_iso_val, "%Y-%m-%d").strftime("%d/%m/%Y")
-            elements.append(Paragraph(f"Informe general del dia {fecha_mostrar}", estilo_fecha))
-            elements.append(Paragraph(f"<b>Cuidador/a:</b> {cuidador or '—'}", estilo_texto))
-            elements.append(Spacer(1, 4))
-
-            for camp, fragments in campos.items():
-                elements.append(Paragraph(f"<b>{camp}:</b>", estilo_titulo_bloque))
-                for frag in fragments:
-                    elements.append(Paragraph(frag.replace("\n", "<br/>"), estilo_texto))
-                    elements.append(Spacer(1, 2))
-
-            elements.append(Spacer(1, 8))
-            elements.append(Paragraph("<hr/>", estilo_texto))
-            elements.append(Spacer(1, 4))
-
-    doc.build(elements)
-    return fname
+    st.rerun()
 
 
-def generar_pdf_historico_general(desde, hasta):
-    desde_iso = desde.strftime("%Y-%m-%d")
-    hasta_iso = hasta.strftime("%Y-%m-%d")
+def cambiar_contraseña():
+    st.header("🔑 Canviar contrasenya")
 
-    fname = os.path.join(
-        PDFS_DIR,
-        f"historico_general_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
-    )
-    doc = SimpleDocTemplate(
-        fname,
-        pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm
-    )
-    elements = []
+    usuario = st.text_input("Usuari (login)", key="chg_usuario").strip().lower()
+    pw1 = st.text_input("Nova contrasenya", type="password", key="chg_pw1")
+    pw2 = st.text_input("Repetir nova contrasenya", type="password", key="chg_pw2")
 
-    estilo_fecha = ParagraphStyle(name="Fecha", fontName="Helvetica-Bold", fontSize=13, spaceAfter=6)
-    estilo_titulo = ParagraphStyle(name="Titulo", fontName="Helvetica-Bold", fontSize=12, spaceAfter=4)
-    estilo_texto = ParagraphStyle(name="Texto", fontName="Helvetica", fontSize=10, leading=14)
+    col1, col2 = st.columns(2)
 
-    try:
-        registros = DV.get_informes_generales_rango(desde_iso, hasta_iso)
-    except Exception as e:
-        st.error(f"Error llegint informes generals de Dataverse: {e}")
-        registros = []
+    with col1:
+        if st.button("Guardar", use_container_width=True):
+            if not usuario or not pw1 or not pw2:
+                st.warning("Omple tots els camps.")
+                return
 
-    if not registros:
-        return None
+            if pw1 != pw2:
+                st.error("Les contrasenyes no coincideixen.")
+                return
 
-    elements.append(Paragraph(
-        "Residència Reina Sofia",
-        ParagraphStyle(name="TituloCab", alignment=TA_CENTER, fontName="Helvetica-Bold", fontSize=16)
-    ))
-    elements.append(Paragraph(
-        "Històric d'informes generals",
-        ParagraphStyle(name="SubCab", alignment=TA_CENTER, fontName="Helvetica", fontSize=12)
-    ))
-    elements.append(Spacer(1, 12))
+            try:
+                DV.set_usuario_hash(usuario, _hash_password(pw1))
+            except Exception as e:
+                st.error(f"Error guardant contrasenya a Dataverse: {e}")
+                return
 
-    for rec in registros:
-        fecha_iso_val = rec.get("fecha") or ""  # ISO
-        cuidador = rec.get("cuidador") or ""
-        entradas = rec.get("entradas") or ""
-        mantenimiento = rec.get("mantenimiento") or ""
-        temas = rec.get("temas") or ""
-        informe_id = rec.get("id")
+            st.success("✅ Contrasenya guardada correctament.")
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
 
-        try:
-            taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
-        except Exception as e:
-            st.error(f"Error llegint taxis de Dataverse: {e}")
-            taxis_list = []
+    with col2:
+        if st.button("🏠 Tornar al menú", use_container_width=True):
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
 
-        fecha_mostrar = (
-            datetime.strptime(fecha_iso_val, "%Y-%m-%d").strftime("%d/%m/%Y")
-            if fecha_iso_val else "—"
-        )
-
-        elements.append(Paragraph(f"Informe del dia {fecha_mostrar}", estilo_fecha))
-        elements.append(Paragraph(f"<b>Cuidador/a:</b> {cuidador or '—'}", estilo_texto))
-        elements.append(Spacer(1, 4))
-
-        elements.append(Paragraph("<b>Informe del dia:</b>", estilo_titulo))
-        elements.append(Paragraph((entradas or '—').replace("\n", "<br/>"), estilo_texto))
-
-        elements.append(Paragraph("<b>Notes per direcció, manteniment i neteja:</b>", estilo_titulo))
-        elements.append(Paragraph((mantenimiento or '—').replace("\n", "<br/>"), estilo_texto))
-
-        elements.append(Paragraph("<b>Pícnics pel dia següent:</b>", estilo_titulo))
-        elements.append(Paragraph((temas or '—').replace("\n", "<br/>"), estilo_texto))
-
-        if taxis_list:
-            data = [["Data servei", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
-            for t in taxis_list:
-                fecha_servicio_str = _parse_fecha_any_to_ddmmyyyy(t.get("Fecha", ""))
-                data.append([
-                    fecha_servicio_str,
-                    t.get("Hora", ""),
-                    t.get("Recogida", ""),
-                    t.get("Destino", ""),
-                    t.get("Deportistas", ""),
-                    t.get("Observaciones", "")
-                ])
-
-            table = Table(data, colWidths=[2.3*cm, 2.3*cm, 3*cm, 3*cm, 3*cm, 3*cm])
-            table.setStyle(TableStyle([("GRID", (0,0), (-1,-1), 0.5, colors.black)]))
-            elements.append(table)
-
-        elements.append(Spacer(1, 12))
-        elements.append(Paragraph("<hr/>", estilo_texto))
-
-    doc.build(elements)
-    return fname
-
-
-def _recopilar_taxis_en_rang(desde, hasta):
-    desde_iso = desde.strftime("%Y-%m-%d")
-    hasta_iso = hasta.strftime("%Y-%m-%d")
-
-    try:
-        informes = DV.get_informes_generales_rango(desde_iso, hasta_iso)
-    except Exception as e:
-        st.error(f"Error llegint informes generals per a taxis de Dataverse: {e}")
-        informes = []
-
-    filas = []
-
-    for rec in informes:
-        fecha_informe_iso = rec.get("fecha") or ""  # ISO
-        informe_id = rec.get("id")
-
-        try:
-            taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
-        except Exception as e:
-            st.error(f"Error llegint taxis de Dataverse: {e}")
-            taxis_list = []
-
-        try:
-            fecha_inf_str = datetime.strptime(fecha_informe_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
-        except Exception:
-            fecha_inf_str = fecha_informe_iso
-
-        for t in taxis_list:
-            fecha_servicio_str = _parse_fecha_any_to_ddmmyyyy(t.get("Fecha", "") or "")
-            hora = t.get("Hora", "") or ""
-            recollida = t.get("Recogida", "") or ""
-            desti = t.get("Destino", "") or ""
-            esportistes = t.get("Deportistas", "") or ""
-            observacions = t.get("Observaciones", "") or ""
-
-            filas.append([
-                fecha_inf_str,
-                fecha_servicio_str,
-                hora,
-                recollida,
-                desti,
-                esportistes,
-                observacions
-            ])
-
-    return filas
-
-
-def generar_pdf_historico_taxis(desde, hasta):
-    filas = _recopilar_taxis_en_rang(desde, hasta)
-    if not filas:
-        return None
-
-    fname = os.path.join(
-        PDFS_DIR,
-        f"historico_taxis_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
-    )
-
-    doc = SimpleDocTemplate(
-        fname,
-        pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm
-    )
-    elements = []
-
-    estilo_titulo = ParagraphStyle(
-        name="TituloTaxis",
-        fontName="Helvetica-Bold",
-        fontSize=16,
-        alignment=TA_CENTER,
-        spaceAfter=8
-    )
-    estilo_sub = ParagraphStyle(
-        name="SubTaxis",
-        fontName="Helvetica",
-        fontSize=12,
-        alignment=TA_CENTER,
-        spaceAfter=12
-    )
-
-    elements.append(Paragraph("Residència Reina Sofia", estilo_titulo))
-    elements.append(Paragraph(
-        f"Històric de serveis de taxi ({desde.strftime('%d/%m/%Y')} - {hasta.strftime('%d/%m/%Y')})",
-        estilo_sub
-    ))
-    elements.append(Spacer(1, 8))
-
-    data = [["Data informe", "Data servei", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
-    data.extend(filas)
-
-    table = Table(data, colWidths=[2.5*cm, 2.5*cm, 2*cm, 3*cm, 3*cm, 3*cm, 3*cm])
-    table.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-    ]))
-
-    elements.append(table)
-    doc.build(elements)
-    return fname
-
-
-def obtener_historico_taxis_df(desde, hasta):
-    filas = _recopilar_taxis_en_rang(desde, hasta)
-    if not filas:
-        return None
-
-    columnas = [
-        "Data informe",
-        "Data servei",
-        "Hora",
-        "Recollida",
-        "Destí",
-        "Esportistes",
-        "Observacions"
-    ]
-    df = pd.DataFrame(filas, columns=columnas)
-    return df
-
-# (La parte AUTH la dejas tal cual: no depende de las fechas)
 
 # app_dataverse.py - Bloque 10
 # -----------------------
@@ -2153,21 +1674,15 @@ import io
 def main():
     # --- Autenticación de usuario ---
     if "usuario_autenticado" not in st.session_state or not st.session_state["usuario_autenticado"]:
-        try:
-            login()
-        except Exception:
-            st.error("Error real en login():")
-            st.code(traceback.format_exc())
-        return
-    
-    if "usuario_autenticado" not in st.session_state or not st.session_state["usuario_autenticado"]:
         login()
         return
 
+    # --- Càrrega d'esportistes des de Dataverse (una vegada per sessió) ---
     if "alumnos_cargados" not in st.session_state:
         cargar_alumnos_desde_dataverse()
         st.session_state["alumnos_cargados"] = True
 
+    # --- Barra lateral ---
     st.sidebar.markdown(f"👤 Usuari: **{st.session_state.get('usuario','').capitalize()}**")
     if st.sidebar.button("🔑 Canviar contrasenya"):
         st.session_state["vista_actual"] = "cambiar_contraseña"
@@ -2196,16 +1711,8 @@ def main():
             "Seleccionar tipus d'històric",
             ["Històric individual", "Històric general", "Històric taxis"]
         )
-
-        desde = st.date_input("Des de", value=date.today())
-        hasta = st.date_input("Fins a", value=date.today())
-
-        if hasta < desde:
-            st.error("El rang de dates no és vàlid: 'Fins a' no pot ser anterior a 'Des de'.")
-            if st.button("🏠 Tornar al menú"):
-                st.session_state["vista_actual"] = "menu"
-                st.rerun()
-            return
+        desde = st.date_input("Des de")
+        hasta = st.date_input("Fins a")
 
         st.divider()
 
@@ -2299,5 +1806,6 @@ def main():
             st.rerun()
 
 
-if __name__ == "__main__":
-    main()
+# En Streamlit, llama a main() al final del archivo (y solo aquí)
+main()
+
