@@ -364,18 +364,22 @@ class DataverseClient:
             return location.split("(")[1].split(")")[0]
         return None
 
-    def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, str]]:
-        alumno_esc = alumno.replace("'", "''")
-        filtro = f"cr143_alumne eq '{alumno_esc}'"
-        endpoint = f"{ENTITY_INDIV}?$filter={filtro}&$orderby=cr143_fechainforme desc"
-        data = self.get(endpoint)
-        rows = data.get("value", []) if data else []
+def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, str]]:
+    alumno_esc = alumno.replace("'", "''")
+    filtro = f"cr143_alumne eq '{alumno_esc}'"
+    endpoint = f"{ENTITY_INDIV}?$filter={filtro}&$orderby=cr143_fechainforme desc"
+    data = self.get(endpoint)
 
-        res: list[tuple[str, str]] = []
-        for rec in rows:
-           fecha_iso_out = dv_date(rec.get("cr143_fechainforme"))
-            res.append((fecha_iso_out, rec.get("cr143_congingut") or ""))
-        return res
+    rows = data.get("value", []) if data else []
+    res: list[tuple[str, str]] = []
+
+    for rec in rows:
+        fecha_iso_out = dv_date(rec.get("cr143_fechainforme"))
+        contenido = rec.get("cr143_congingut") or ""
+        res.append((fecha_iso_out, contenido))
+
+    return res
+
 
     # =========================================================
     # 🔶 ALUMNOS (Esportistes)
