@@ -94,6 +94,30 @@ ALUMNOS_ALIAS_FIELD = "cr143_alias"  # nom lògic confirmat
 import pandas as pd
 
 
+def dv_date(value: str) -> str:
+    """
+    Convierte cualquier fecha de Dataverse a formato dd/mm/yyyy.
+    Acepta:
+      - 2025-12-15
+      - 2025-12-15T00:00:00
+      - 2025-12-15T00:00:00Z
+    """
+    if not value:
+        return ""
+
+    v = value.strip()
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+
+    try:
+        return datetime.fromisoformat(v).date().strftime("%d/%m/%Y")
+    except Exception:
+        try:
+            return datetime.strptime(v[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+        except Exception:
+            return ""
+
+
 class DataverseClient:
     def __init__(self):
         self._token: str | None = None
@@ -258,8 +282,6 @@ class DataverseClient:
         taxis: list[dict] = []
         for rec in rows:
             fecha_txt = dv_date(rec.get("cr143_fecha"))
-
-
             taxis.append({
                 "Fecha": fecha_txt,
                 "Hora": rec.get("cr143_hora") or "",
@@ -271,10 +293,6 @@ class DataverseClient:
         return taxis
 
     def replace_taxis_for_informe(self, informe_id: str, fecha_iso: str, taxis_list: list[dict]):
-        """
-        Borra todos los taxis asociados a ese informe y crea los nuevos.
-        Sanea valores para evitar arrays en Dataverse.
-        """
         if not informe_id:
             return
 
@@ -364,22 +382,21 @@ class DataverseClient:
             return location.split("(")[1].split(")")[0]
         return None
 
-def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, str]]:
-    alumno_esc = alumno.replace("'", "''")
-    filtro = f"cr143_alumne eq '{alumno_esc}'"
-    endpoint = f"{ENTITY_INDIV}?$filter={filtro}&$orderby=cr143_fechainforme desc"
-    data = self.get(endpoint)
+    def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, str]]:
+        alumno_esc = alumno.replace("'", "''")
+        filtro = f"cr143_alumne eq '{alumno_esc}'"
+        endpoint = f"{ENTITY_INDIV}?$filter={filtro}&$orderby=cr143_fechainforme desc"
+        data = self.get(endpoint)
 
-    rows = data.get("value", []) if data else []
-    res: list[tuple[str, str]] = []
+        rows = data.get("value", []) if data else []
+        res: list[tuple[str, str]] = []
 
-    for rec in rows:
-        fecha_iso_out = dv_date(rec.get("cr143_fechainforme"))
-        contenido = rec.get("cr143_congingut") or ""
-        res.append((fecha_iso_out, contenido))
+        for rec in rows:
+            fecha_out = dv_date(rec.get("cr143_fechainforme"))
+            contenido = rec.get("cr143_congingut") or ""
+            res.append((fecha_out, contenido))
 
-    return res
-
+        return res
 
     # =========================================================
     # 🔶 ALUMNOS (Esportistes)
@@ -448,13 +465,10 @@ def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, s
 
         res: list[dict] = []
         for rec in rows:
-            fecha_raw = (rec.get("cr143_codigofecha") or "").strip()
-            fecha_iso_out = dv_date(rec.get("cr143_codigofecha"))
-
-
+            fecha_out = dv_date(rec.get("cr143_codigofecha"))
             res.append({
                 "id": rec.get("cr143_informegeneralid"),
-                "fecha": fecha_iso_out,
+                "fecha": fecha_out,
                 "cuidador": rec.get("cr143_cuidador") or "",
                 "entradas": rec.get("cr143_informedeldia") or "",
                 "mantenimiento": rec.get("cr143_notesdireccio") or "",
@@ -483,10 +497,10 @@ def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, s
         res: list[dict] = []
         for rec in rows:
             fecha_raw = (rec.get("cr143_codigofecha") or "").strip()
-            fecha_iso_out = dv_date(rec.get("cr143_codigofecha")) if fecha_raw else ""
+            fecha_out = dv_date(rec.get("cr143_codigofecha")) if fecha_raw else ""
             res.append({
                 "id": rec.get("cr143_informegeneralid"),
-                "fecha": fecha_iso_out,
+                "fecha": fecha_out,
                 "cuidador": rec.get("cr143_cuidador") or "",
                 "entradas": rec.get("cr143_informedeldia") or "",
                 "mantenimiento": rec.get("cr143_notesdireccio") or "",
@@ -498,16 +512,11 @@ def get_informes_individuales_por_alumno(self, alumno: str) -> list[tuple[str, s
 # Instancia global del cliente Dataverse
 DV = DataverseClient()
 
+
 # =========================================================
 # Càrrega d'esportistes (ALUMNOS + ALIAS_DEPORTISTAS)
 # =========================================================
-
 def cargar_alumnos_desde_dataverse():
-    """
-    Omple les globals:
-      - ALUMNOS: llista de noms (ordenada)
-      - ALIAS_DEPORTISTAS: dict {nom -> alias}
-    """
     global ALUMNOS, ALIAS_DEPORTISTAS
 
     try:
@@ -533,36 +542,9 @@ def cargar_alumnos_desde_dataverse():
     ALUMNOS = sorted(set(alumnos), key=lambda x: x.lower())
     ALIAS_DEPORTISTAS = alias_map
 
+
 def dv_get_alumnos():
     return DV.get_alumnos()
-
-def dv_date(value: str) -> str:
-    """
-    Convierte cualquier fecha de Dataverse a formato dd/mm/yyyy.
-    Acepta:
-      - 2025-12-15
-      - 2025-12-15T00:00:00
-      - 2025-12-15T00:00:00Z
-    """
-    if not value:
-        return ""
-
-    v = value.strip()
-
-    # Dataverse suele devolver ...Z
-    if v.endswith("Z"):
-        v = v[:-1] + "+00:00"
-
-    try:
-        return datetime.fromisoformat(v).date().strftime("%d/%m/%Y")
-    except Exception:
-        try:
-            return datetime.strptime(v[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
-        except Exception:
-            return ""
-
-
-
 
 
 
