@@ -504,6 +504,40 @@ class DataverseClient:
 # Instancia global del cliente Dataverse
 DV = DataverseClient()
 
+# =========================================================
+# Càrrega d'esportistes (ALUMNOS + ALIAS_DEPORTISTAS)
+# =========================================================
+
+def cargar_alumnos_desde_dataverse():
+    """
+    Omple les globals:
+      - ALUMNOS: llista de noms (ordenada)
+      - ALIAS_DEPORTISTAS: dict {nom -> alias}
+    """
+    global ALUMNOS, ALIAS_DEPORTISTAS
+
+    try:
+        rows = DV.get_alumnos()  # [{nombre:..., alias:...}, ...]
+    except Exception as e:
+        st.error(f"Error carregant esportistes des de Dataverse: {e}")
+        ALUMNOS = []
+        ALIAS_DEPORTISTAS = {}
+        return
+
+    alumnos = []
+    alias_map = {}
+
+    for r in rows or []:
+        nombre = (r.get("nombre") or "").strip()
+        if not nombre:
+            continue
+
+        alias = (r.get("alias") or "").strip()
+        alumnos.append(nombre)
+        alias_map[nombre] = alias if alias else generar_alias(nombre)
+
+    ALUMNOS = sorted(set(alumnos), key=lambda x: x.lower())
+    ALIAS_DEPORTISTAS = alias_map
 
 def dv_get_alumnos():
     return DV.get_alumnos()
