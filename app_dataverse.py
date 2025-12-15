@@ -60,9 +60,8 @@ def generar_alias(nombre_completo: str) -> str:
 ALUMNOS: list[str] = []
 ALIAS_DEPORTISTAS: dict[str, str] = {}
 
-
 # =========================================================
-# app_dataverse.py - BLOQUE 2 (CLIENTE DATAVERSE) — COMPLETO
+# app_dataverse.py - BLOQUE 2 (CLIENTE DATAVERSE) — CORREGIDO
 # =========================================================
 
 # -----------------------
@@ -74,26 +73,25 @@ TENANT_ID = DV_CFG["tenant_id"]
 CLIENT_ID = DV_CFG["client_id"]
 CLIENT_SECRET = DV_CFG["client_secret"]
 
-RESOURCE = DV_CFG["resource"]      # p.ej. "https://<org>.crm.dynamics.com"
-API_BASE = DV_CFG["api_base"]      # p.ej. "https://<org>.api.crm.dynamics.com/api/data/v9.2"
+RESOURCE = DV_CFG["resource"]
+API_BASE = DV_CFG["api_base"]
 
 ENTITY_INFORMES = DV_CFG["informes_entity_set"]          # p.ej. "cr143_informegenerals"
 ENTITY_TAXIS = DV_CFG["taxis_entity_set"]                # p.ej. "cr143_taxis"
-ENTITY_INDIV = DV_CFG["informes_ind_entity_set"]         # p.ej. "cr143_informeindividualses" (entity set)
+ENTITY_INDIV = DV_CFG["informes_ind_entity_set"]         # p.ej. "cr143_informeindividualses"
 ENTITY_USUARIOS = DV_CFG["usuarios_entity_set"]          # p.ej. "cr143_usuarisaplicacios"
 ENTITY_ALUMNOS = DV_CFG["alumnos_entity_set"]            # p.ej. "cr143_esportistas"
 
-# Campos usuarios (login y nombre visible)
-USUARIOS_LOGIN_FIELD = "cr143_nomusuariregistre"   # login (minúsculas)
-USUARIOS_NOMBRE_FIELD = "cr143_nomusuari"          # nombre visible
+# Camp d'usuari per fer login i camp de nom visible
+USU_LOGIN_FIELD = "cr143_nomusuariregistre"
+USU_NAME_FIELD  = "cr143_nomusuari"
 
-# (compatibilidad con variables antiguas usadas en tu código)
-USU_LOGIN_FIELD = USUARIOS_LOGIN_FIELD
-USU_NAME_FIELD  = USUARIOS_NOMBRE_FIELD
+# Camps d'esportistes
+ALUMNOS_NAME_FIELD  = "cr143_nomcomplet"
+ALUMNOS_ALIAS_FIELD = "cr143_alias"  # nom lògic confirmat
 
-# Campos alumnos (nombre y alias)
-ALUMNOS_NAME_FIELD = "cr143_nomcomplet"
-ALUMNOS_ALIAS_FIELD = "cr143_alias"
+# (Opcional però recomanat per evitar NameError si algun import falta a bloc 1)
+import pandas as pd
 
 
 class DataverseClient:
@@ -161,11 +159,11 @@ class DataverseClient:
         return r
 
     # =========================================================
-    # 🔶 USUARIOS (login / nombre visible) – tabla cr143_usuarisaplicacios
+    # 🔶 USUARIOS
     # =========================================================
     def _get_usuario_registro(self, usuario_login: str) -> dict | None:
         usuario_esc = usuario_login.replace("'", "''")
-        filtro = f"{USUARIOS_LOGIN_FIELD} eq '{usuario_esc}'"
+        filtro = f"{USU_LOGIN_FIELD} eq '{usuario_esc}'"
         endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
         data = self.get(endpoint)
         if not data or not data.get("value"):
@@ -180,12 +178,12 @@ class DataverseClient:
 
     def set_usuario_hash(self, usuario_login: str, password_hash: str):
         usuario_esc = usuario_login.replace("'", "''")
-        filtro = f"{USUARIOS_LOGIN_FIELD} eq '{usuario_esc}'"
+        filtro = f"{USU_LOGIN_FIELD} eq '{usuario_esc}'"
         endpoint = f"{ENTITY_USUARIOS}?$filter={filtro}"
         data = self.get(endpoint)
 
         payload = {
-            USUARIOS_LOGIN_FIELD: usuario_login,
+            USU_LOGIN_FIELD: usuario_login,
             "cr143_passwordhash": password_hash,
         }
 
@@ -199,27 +197,10 @@ class DataverseClient:
         rec = self._get_usuario_registro(usuario_login)
         if not rec:
             return None
-        return (rec.get(USUARIOS_NOMBRE_FIELD) or "").strip()
-
-    def get_usuarios_cuidadores(self) -> list[dict]:
-        """
-        Devuelve una lista:
-        [{ "usuario": <login>, "cuidador": <nombre visible> }, ...]
-        """
-        select = ",".join([USUARIOS_LOGIN_FIELD, USUARIOS_NOMBRE_FIELD])
-        endpoint = f"{ENTITY_USUARIOS}?$select={select}"
-        data = self.get(endpoint)
-        rows = data.get("value", []) if data else []
-
-        res: list[dict] = []
-        for rec in rows:
-            usu = (rec.get(USUARIOS_LOGIN_FIELD) or "").strip()
-            nom = (rec.get(USUARIOS_NOMBRE_FIELD) or "").strip()
-            res.append({"usuario": usu, "cuidador": nom})
-        return res
+        return (rec.get(USU_NAME_FIELD) or "").strip()
 
     # =========================================================
-    # 🔶 INFORME GENERAL – tabla cr143_informegeneral
+    # 🔶 INFORME GENERAL
     # =========================================================
     def get_informe_general(self, fecha_iso: str) -> dict | None:
         fecha_esc = fecha_iso.replace("'", "''")
@@ -238,16 +219,8 @@ class DataverseClient:
             "temas": rec.get("cr143_picnics") or "",
         }
 
-    def upsert_informe_general(
-        self,
-        fecha_iso: str,
-        cuidador: str,
-        entradas: str,
-        mantenimiento: str,
-        temas: str,
-    ) -> str | None:
+    def upsert_informe_general(self, fecha_iso: str, cuidador: str, entradas: str, mantenimiento: str, temas: str) -> str | None:
         existente = self.get_informe_general(fecha_iso)
-
         fecha_date = datetime.strptime(fecha_iso, "%Y-%m-%d").date().isoformat()
 
         payload = {
@@ -271,7 +244,7 @@ class DataverseClient:
         return None
 
     # =========================================================
-    # 🔶 TAXIS – tabla cr143_taxis
+    # 🔶 TAXIS
     # =========================================================
     def get_taxis_by_informe(self, informe_id: str) -> list[dict]:
         if not informe_id:
@@ -291,6 +264,7 @@ class DataverseClient:
                     fecha_txt = datetime.fromisoformat(fecha_raw).date().strftime("%Y-%m-%d")
                 except Exception:
                     fecha_txt = ""
+
             taxis.append({
                 "Fecha": fecha_txt,
                 "Hora": rec.get("cr143_hora") or "",
@@ -304,7 +278,7 @@ class DataverseClient:
     def replace_taxis_for_informe(self, informe_id: str, fecha_iso: str, taxis_list: list[dict]):
         """
         Borra todos los taxis asociados a ese informe y crea los nuevos.
-        Sanea valores para que Dataverse reciba SOLO primitvos.
+        Sanea valores para evitar arrays en Dataverse.
         """
         if not informe_id:
             return
@@ -312,7 +286,6 @@ class DataverseClient:
         def _to_text(v) -> str:
             if v is None:
                 return ""
-            # pandas NaN
             try:
                 if isinstance(v, float) and pd.isna(v):
                     return ""
@@ -322,22 +295,18 @@ class DataverseClient:
                 return "\n".join([str(x) for x in v if x is not None])
             return str(v)
 
-        # 1) Leer taxis actuales
         filtro = f"_cr143_informegeneral_value eq {informe_id}"
         endpoint = f"{ENTITY_TAXIS}?$filter={filtro}"
         data = self.get(endpoint)
         rows = data.get("value", []) if data else []
 
-        # 2) Borrar taxis actuales
         for rec in rows:
             taxi_id = rec["cr143_taxiid"]
             self.delete(f"{ENTITY_TAXIS}({taxi_id})")
 
-        # 3) Crear nuevos taxis
         for t in taxis_list:
             fecha_txt = _to_text(t.get("Fecha") or fecha_iso).strip()
 
-            # Acepta yyyy-mm-dd o dd/mm/yyyy y lo guarda como ISO yyyy-mm-dd
             fecha_iso_real = None
             for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
                 try:
@@ -360,7 +329,7 @@ class DataverseClient:
             self.post(ENTITY_TAXIS, payload)
 
     # =========================================================
-    # 🔶 INFORMES INDIVIDUALS – tabla cr143_informeindividuals
+    # 🔶 INFORMES INDIVIDUALS
     # =========================================================
     def get_informe_individual(self, fecha_iso: str, alumno: str) -> dict | None:
         fecha_esc = fecha_iso.replace("'", "''")
@@ -373,9 +342,7 @@ class DataverseClient:
 
         rec = data["value"][0]
         return {
-            # ✅ Clave primaria correcta (con “s”)
             "id": rec.get("cr143_informeindividualsid"),
-            # ✅ Campo lógico correcto (según tu Dataverse)
             "contenido": rec.get("cr143_congingut") or "",
         }
 
@@ -412,23 +379,19 @@ class DataverseClient:
         res: list[tuple[str, str]] = []
         for rec in rows:
             fecha_raw = rec.get("cr143_fechainforme")
-            fecha_iso = ""
+            fecha_iso_out = ""
             if fecha_raw:
                 try:
-                    fecha_iso = datetime.fromisoformat(fecha_raw).date().strftime("%Y-%m-%d")
+                    fecha_iso_out = datetime.fromisoformat(fecha_raw).date().strftime("%Y-%m-%d")
                 except Exception:
-                    fecha_iso = ""
-            res.append((fecha_iso, rec.get("cr143_congingut") or ""))
+                    fecha_iso_out = ""
+            res.append((fecha_iso_out, rec.get("cr143_congingut") or ""))
         return res
 
     # =========================================================
-    # 🔶 ALUMNOS – taula d'esportistes
+    # 🔶 ALUMNOS (Esportistes)
     # =========================================================
     def get_alumnos(self) -> list[dict]:
-        """
-        Devuelve:
-        [{ "nombre": <nom complet>, "alias": <alias> }, ...]
-        """
         data = self.get(ENTITY_ALUMNOS)
         if not data or "value" not in data:
             return []
@@ -450,7 +413,7 @@ class DataverseClient:
         return res
 
     # =========================================================
-    # 🔶 HELPERS EXTRA PARA HISTÓRICOS Y CONSULTAS
+    # 🔶 HELPERS EXTRA
     # =========================================================
     def get_alumnos_con_informe_en_fecha(self, fecha_iso: str) -> list[str]:
         fecha_esc = fecha_iso.replace("'", "''")
@@ -494,6 +457,7 @@ class DataverseClient:
         for rec in rows:
             fecha_raw = (rec.get("cr143_codigofecha") or "").strip()
             fecha_iso_out = fecha_raw.split("T")[0] if fecha_raw else ""
+
             res.append({
                 "id": rec.get("cr143_informegeneralid"),
                 "fecha": fecha_iso_out,
@@ -540,12 +504,9 @@ class DataverseClient:
 # Instancia global del cliente Dataverse
 DV = DataverseClient()
 
-# -------------------------------------------------
-# Compatibilitat amb codi antic: dv_get_alumnos()
-# -------------------------------------------------
+
 def dv_get_alumnos():
     return DV.get_alumnos()
-
 
 # app.py - Bloque 3
 
