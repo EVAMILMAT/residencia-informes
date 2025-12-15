@@ -2143,6 +2143,107 @@ def obtener_historico_taxis_df(desde, hasta):
     df = pd.DataFrame(filas, columns=columnas)
     return df
 
+# =========================================================
+# AUTH: login / logout / cambiar contraseña (Dataverse)
+# =========================================================
+
+def _hash_password(pw: str) -> str:
+    return hashlib.sha256((pw or "").encode("utf-8")).hexdigest()
+
+def login():
+    st.header("🔐 Accés a l'aplicació")
+
+    # Inicializar flags
+    if "usuario_autenticado" not in st.session_state:
+        st.session_state["usuario_autenticado"] = False
+    if "usuario" not in st.session_state:
+        st.session_state["usuario"] = ""
+
+    usuario = st.text_input("Usuari", key="login_usuario").strip().lower()
+    password = st.text_input("Contrasenya", type="password", key="login_password")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Entrar", use_container_width=True):
+            if not usuario or not password:
+                st.warning("Introdueix usuari i contrasenya.")
+                return
+
+            try:
+                hash_guardado = DV.get_usuario_hash(usuario)
+            except Exception as e:
+                st.error(f"Error llegint usuari a Dataverse: {e}")
+                return
+
+            if not hash_guardado:
+                st.error("Usuari no existent o sense contrasenya configurada.")
+                return
+
+            if _hash_password(password) != hash_guardado:
+                st.error("Contrasenya incorrecta.")
+                return
+
+            st.session_state["usuario_autenticado"] = True
+            st.session_state["usuario"] = usuario
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
+
+    with col2:
+        if st.button("Crear/Restablir contrasenya", use_container_width=True):
+            st.session_state["vista_actual"] = "cambiar_contraseña"
+            st.rerun()
+
+def logout():
+    # Mantén lo mínimo; no borres secrets ni nada
+    st.session_state["usuario_autenticado"] = False
+    st.session_state["usuario"] = ""
+    st.session_state["vista_actual"] = "menu"
+    # Opcional: limpiar estado sensible
+    for k in ["login_password"]:
+        if k in st.session_state:
+            st.session_state.pop(k, None)
+    st.rerun()
+
+def cambiar_contraseña():
+    st.header("🔑 Canviar contrasenya")
+
+    usuario = st.text_input("Usuari (login)", key="chg_usuario").strip().lower()
+    pw1 = st.text_input("Nova contrasenya", type="password", key="chg_pw1")
+    pw2 = st.text_input("Repetir nova contrasenya", type="password", key="chg_pw2")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Guardar", use_container_width=True):
+            if not usuario or not pw1 or not pw2:
+                st.warning("Omple tots els camps.")
+                return
+            if pw1 != pw2:
+                st.error("Les contrasenyes no coincideixen.")
+                return
+
+            try:
+                DV.set_usuario_hash(usuario, _hash_password(pw1))
+            except Exception as e:
+                st.error(f"Error guardant contrasenya a Dataverse: {e}")
+                return
+
+            st.success("✅ Contrasenya guardada.")
+            # Si estaba logueado, no lo expulsamos; solo volvemos
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
+
+    with col2:
+        if st.button("🏠 Tornar al menú", use_container_width=True):
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
+
+
+
+
+
+
+
 # app_dataverse.py - Bloque 10
 # -----------------------
 # Lógica principal
