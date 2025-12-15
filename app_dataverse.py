@@ -312,43 +312,68 @@ class DataverseClient:
             })
         return taxis
 
-    def replace_taxis_for_informe(self, informe_id: str, fecha_iso: str, taxis_list: list[dict]):
-        """
-        Borra todos los taxis asociados a ese informe y crea los nuevos de taxis_list.
-        """
-        if not informe_id:
-            return
+def replace_taxis_for_informe(self, informe_id: str, fecha_iso: str, taxis_list: list[dict]):
+    """
+    Borra todos los taxis asociados a ese informe y crea los nuevos de taxis_list.
+    Sanea valores para que Dataverse reciba solo primitvos (string/number/date).
+    """
+    if not informe_id:
+        return
 
-        # 1) Leer taxis actuales
-        filtro = f"_cr143_informegeneral_value eq {informe_id}"
-        endpoint = f"{ENTITY_TAXIS}?$filter={filtro}"
-        data = self.get(endpoint)
-        rows = data.get("value", []) if data else []
+    def _to_text(v) -> str:
+        # Convierte listas/tuplas -> texto, NaN/None -> ""
+        if v is None:
+            return ""
+        # pandas NaN
+        try:
+            if isinstance(v, float) and pd.isna(v):
+                return ""
+        except Exception:
+            pass
+        if isinstance(v, (list, tuple, set)):
+            # Une elementos a texto (saltos de línea)
+            return "\n".join([str(x) for x in v if x is not None])
+        # Todo lo demás a string
+        return str(v)
 
-        # 2) Borrar taxis actuales
-        for rec in rows:
-            taxi_id = rec["cr143_taxiid"]
-            self.delete(f"{ENTITY_TAXIS}({taxi_id})")
+    # 1) Leer taxis actuales
+    filtro = f"_cr143_informegeneral_value eq {informe_id}"
+    endpoint = f"{ENTITY_TAXIS}?$filter={filtro}"
+    data = self.get(endpoint)
+    rows = data.get("value", []) if data else []
 
-        # 3) Crear nuevos taxis
-        for t in taxis_list:
-            fecha_txt = t.get("Fecha") or fecha_iso
+    # 2) Borrar taxis actuales
+    for rec in rows:
+        taxi_id = rec["cr143_taxiid"]
+        self.delete(f"{ENTITY_TAXIS}({taxi_id})")
+
+    # 3) Crear nuevos taxis
+    for t in taxis_list:
+        fecha_txt = _to_text(t.get("Fecha") or fecha_iso).strip()
+
+        # Acepta dd/mm/yyyy o yyyy-mm-dd y lo guarda como date ISO (yyyy-mm-dd)
+        fecha_iso_real = None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
             try:
-                fecha_iso_real = datetime.strptime(fecha_txt, "%Y-%m-%d").date().isoformat()
+                fecha_iso_real = datetime.strptime(fecha_txt, fmt).date().isoformat()
+                break
             except Exception:
-                fecha_iso_real = datetime.strptime(fecha_iso, "%Y-%m-%d").date().isoformat()
+                pass
+        if not fecha_iso_real:
+            fecha_iso_real = datetime.strptime(fecha_iso, "%Y-%m-%d").date().isoformat()
 
-            payload = {
-                "cr143_fecha": fecha_iso_real,
-                "cr143_hora": t.get("Hora", "") or "",
-                "cr143_recollida": t.get("Recogida", "") or "",
-                "cr143_desti": t.get("Destino", "") or "",
-                "cr143_esportistes": t.get("Deportistas", "") or "",
-                "cr143_observacions": t.get("Observaciones", "") or "",
-                # Lookup al informe general (nom de navegació):
-                "cr143_Informegeneral@odata.bind": f"/{ENTITY_INFORMES}({informe_id})",
-            }
-            self.post(ENTITY_TAXIS, payload)
+        payload = {
+            "cr143_fecha": fecha_iso_real,
+            "cr143_hora": _to_text(t.get("Hora", "")).strip(),
+            "cr143_recollida": _to_text(t.get("Recogida", "")).strip(),
+            "cr143_desti": _to_text(t.get("Destino", "")).strip(),
+            "cr143_esportistes": _to_text(t.get("Deportistas", "")).strip(),
+            "cr143_observacions": _to_text(t.get("Observaciones", "")).strip(),
+            "cr143_Informegeneral@odata.bind": f"/{ENTITY_INFORMES}({informe_id})",
+        }
+
+        self.post(ENTITY_TAXIS, payload)
+
 
     # =========================================================
     # 🔶 INFORMES INDIVIDUALS – taula cr143_informeindividuals
