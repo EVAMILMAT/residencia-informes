@@ -15,6 +15,7 @@ import json
 import streamlit.components.v1 as components
 import hashlib
 import requests
+import traceback
 
 # -----------------------
 # Configuración página
@@ -2150,6 +2151,15 @@ def obtener_historico_taxis_df(desde, hasta):
 import io
 
 def main():
+    # --- Autenticación de usuario ---
+    if "usuario_autenticado" not in st.session_state or not st.session_state["usuario_autenticado"]:
+        try:
+            login()
+        except Exception:
+            st.error("Error real en login():")
+            st.code(traceback.format_exc())
+        return
+    
     if "usuario_autenticado" not in st.session_state or not st.session_state["usuario_autenticado"]:
         login()
         return
