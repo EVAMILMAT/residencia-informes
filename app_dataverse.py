@@ -16,6 +16,7 @@ import streamlit.components.v1 as components
 import hashlib
 import requests
 import traceback
+from reportlab.lib.units import cm
 
 # -----------------------
 # Configuración página
