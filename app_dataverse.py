@@ -1025,6 +1025,9 @@ def _ensure_taxis_df_schema(df: pd.DataFrame) -> pd.DataFrame:
             pass
         if isinstance(v, (datetime, date)):
             return v.strftime("%d/%m/%Y")
+        # si llega algo raro (listas), lo convertimos a texto sin corchetes
+        if isinstance(v, (list, tuple, set)):
+            return "\n".join(str(x) for x in v if x is not None)
         return str(v)
 
     for c in cols:
@@ -1108,7 +1111,10 @@ def formulario_informe_general():
                 "temas": "",
                 "taxis": []
             }
-            st.session_state["taxis_df"] = _ensure_taxis_df_schema(pd.DataFrame(columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observaciones"]))
+            st.session_state["taxis_df"] = _ensure_taxis_df_schema(
+                pd.DataFrame(columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observations"])
+                if False else pd.DataFrame(columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observaciones"])
+            )
             st.session_state["bloqueado"] = False
             st.session_state["informe_general_id"] = None
 
@@ -1259,24 +1265,35 @@ def formulario_informe_general():
                 "Revisa la configuració de la taula d'usuaris a Dataverse."
             )
             return
-    def _texto_plano(v):
-        if v is None:
-            return ""
-        if isinstance(v, (list, tuple, set)):
-            return "\n".join(str(x) for x in v if x is not None)
-        return str(v)
 
-    taxis_records = []
-    for t in st.session_state["taxis_df"].to_dict("records"):
-        taxis_records.append({
-            "Fecha": _texto_plano(t.get("Fecha")),
-            "Hora": _texto_plano(t.get("Hora")),
-            "Recogida": _texto_plano(t.get("Recogida")),
-            "Destino": _texto_plano(t.get("Destino")),
-            "Deportistas": _texto_plano(t.get("Deportistas")),
-            "Observaciones": _texto_plano(t.get("Observaciones")),
-        })
+        # --- SANEJAR taxis (evitar [..] i "..." a PDF/consultes i al guardar) ---
+        def _to_text(v) -> str:
+            if v is None:
+                return ""
+            try:
+                if isinstance(v, float) and pd.isna(v):
+                    return ""
+            except Exception:
+                pass
+            if isinstance(v, (list, tuple, set)):
+                return "\n".join(str(x) for x in v if x is not None)
+            return str(v)
+
+        taxis_records_raw = st.session_state["taxis_df"].to_dict("records")
+        taxis_records = [
+            {
+                "Fecha": _to_text(t.get("Fecha")).strip(),
+                "Hora": _to_text(t.get("Hora")).strip(),
+                "Recogida": _to_text(t.get("Recogida")).strip(),
+                "Destino": _to_text(t.get("Destino")).strip(),
+                "Deportistas": _to_text(t.get("Deportistas")).strip(),
+                "Observaciones": _to_text(t.get("Observaciones")).strip(),
+            }
+            for t in (taxis_records_raw or [])
+        ]
+
         info["taxis"] = taxis_records
+        st.session_state["taxis_df"] = _ensure_taxis_df_schema(pd.DataFrame(taxis_records))
 
         try:
             informe_id = DV.upsert_informe_general(
@@ -1298,7 +1315,7 @@ def formulario_informe_general():
         pdf = generar_pdf_general(
             info["cuidador"], fecha_iso,
             info["entradas"], info["mantenimiento"], info["temas"],
-            info["taxis"], alumnos
+            taxis_records, alumnos
         )
 
         if submitted_enviar:
@@ -1338,7 +1355,7 @@ def formulario_informe_general():
                 st.session_state["vista_actual"] = "menu"
                 st.rerun()
 
-        
+
 # app_dataverse.py – Bloque 8
 # -----------------------
 # Formulari Informe Individual (Dataverse)
