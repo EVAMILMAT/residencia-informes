@@ -1827,6 +1827,259 @@ def obtener_historico_taxis_df(desde, hasta):
         "Observacions"
     ]
     return pd.DataFrame(filas, columns=columnas)
+# =====================================================
+#   PDFS + EMAIL (definir ANTES de main())
+# =====================================================
+
+def generar_pdf_general(cuidador, fecha_iso, entradas, mantenimiento, temas, taxis_list, alumnos_list):
+    # Imports locales para evitar NameError si los imports están en otros bloques
+    from datetime import datetime
+    import os
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+    # Convertir fecha ISO a formato dd/mm/yyyy
+    fecha_dt = datetime.strptime(fecha_iso, "%Y-%m-%d")
+    fecha_formateada = fecha_dt.strftime("%d/%m/%Y")
+    fecha_archivo = fecha_dt.strftime("%d-%m-%Y")
+
+    fname = os.path.join(PDFS_DIR, f"informe_general_{fecha_archivo}.pdf")
+    doc = SimpleDocTemplate(
+        fname,
+        pagesize=A4,
+        rightMargin=2 * cm,
+        leftMargin=2 * cm,
+        topMargin=2.5 * cm,
+        bottomMargin=2 * cm,
+    )
+    elements = []
+
+    # --- Estilos ---
+    titulo = ParagraphStyle(
+        name="Titulo",
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        alignment=TA_CENTER,
+        spaceAfter=20,
+    )
+    subtitulo = ParagraphStyle(
+        name="Subtitulo",
+        fontName="Helvetica",
+        fontSize=12,
+        alignment=TA_CENTER,
+        spaceAfter=12,
+    )
+    bloque_titulo = ParagraphStyle(
+        name="BloqueTitulo",
+        fontName="Helvetica-Bold",
+        fontSize=12,
+        alignment=TA_LEFT,
+        spaceAfter=6,
+    )
+    bloque_texto = ParagraphStyle(
+        name="BloqueTexto",
+        fontName="Helvetica",
+        fontSize=10,
+        alignment=TA_LEFT,
+        leading=14,
+    )
+
+    # --- Cabecera ---
+    elements.append(Paragraph("Residència Reina Sofia", titulo))
+    elements.append(Paragraph(f"<b>Informe del dia {fecha_formateada}</b>", subtitulo))
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph(f"<b>Cuidador/a:</b> {cuidador or '—'}", bloque_texto))
+    elements.append(Spacer(1, 12))
+
+    def bloque(titol, contingut):
+        contingut_html = (contingut or "—").replace("\n", "<br/>")
+        data = [
+            [Paragraph(f"<b>{titol}</b>", bloque_titulo)],
+            [Paragraph(contingut_html, bloque_texto)],
+        ]
+        tabla = Table(data, colWidths=[16 * cm])
+        tabla.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 1, colors.black),
+            ("INNERPADDING", (0, 0), (-1, -1), 6),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+        ]))
+        elements.append(tabla)
+        elements.append(Spacer(1, 12))
+
+    # Blocs principals
+    bloque("Informe del dia", entradas)
+    bloque("Notes per direcció, manteniment i neteja", mantenimiento)
+    bloque("Pícnics pel dia següent", temas)
+
+    # Informes individuals generats
+    if alumnos_list:
+        alumnes_str = "\n".join([f"• {a}" for a in alumnos_list])
+        bloque("Informes individuals generats aquest dia", alumnes_str)
+
+    # --- Taula de taxis ---
+    if taxis_list:
+        elements.append(Paragraph("<b>Taxis</b>", bloque_titulo))
+
+        estilo_cell = ParagraphStyle(
+            name="TaxiCell",
+            parent=bloque_texto,
+            fontSize=9,
+            leading=11,
+            wordWrap="CJK",
+        )
+        estilo_head = ParagraphStyle(
+            name="TaxiHead",
+            parent=bloque_titulo,
+            fontSize=9,
+            leading=11,
+        )
+
+        taxis_data = [[
+            Paragraph("<b>Data</b>", estilo_head),
+            Paragraph("<b>Hora</b>", estilo_head),
+            Paragraph("<b>Recollida</b>", estilo_head),
+            Paragraph("<b>Destí</b>", estilo_head),
+            Paragraph("<b>Esportistes</b>", estilo_head),
+            Paragraph("<b>Observacions</b>", estilo_head),
+        ]]
+
+        for t in taxis_list:
+            # Asegurar texto (sin corchetes/quotes si viniera como lista)
+            def _to_text(v):
+                if v is None:
+                    return ""
+                if isinstance(v, (list, tuple, set)):
+                    return "\n".join([str(x) for x in v if x is not None])
+                return str(v)
+
+            fecha_taxi = _to_text(t.get("Fecha", "")).strip()
+            # Si viniera en ISO, lo pasamos a dd/mm/yyyy
+            if len(fecha_taxi) >= 10 and fecha_taxi[4] == "-" and fecha_taxi[7] == "-":
+                try:
+                    fecha_taxi = datetime.strptime(fecha_taxi[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+                except Exception:
+                    pass
+
+            taxis_data.append([
+                Paragraph(fecha_taxi, estilo_cell),
+                Paragraph(_to_text(t.get("Hora", "")).strip(), estilo_cell),
+                Paragraph(_to_text(t.get("Recogida", "")).strip(), estilo_cell),
+                Paragraph(_to_text(t.get("Destino", "")).strip(), estilo_cell),
+                Paragraph(_to_text(t.get("Deportistas", "")).strip().replace("\n", "<br/>"), estilo_cell),
+                Paragraph(_to_text(t.get("Observaciones", "")).strip().replace("\n", "<br/>"), estilo_cell),
+            ])
+
+        tabla_taxis = Table(taxis_data, colWidths=[2.3*cm, 2.3*cm, 3*cm, 3*cm, 3*cm, 3*cm])
+        tabla_taxis.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+            ("WORDWRAP", (0, 0), (-1, -1), 1),
+        ]))
+        elements.append(tabla_taxis)
+
+    doc.build(elements)
+    return fname
+
+
+def generar_pdf_individual(alumno, contenido, fecha_iso):
+    from datetime import datetime
+    import os
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+    fecha_dt = datetime.strptime(fecha_iso, "%Y-%m-%d")
+    fecha_formateada = fecha_dt.strftime("%d/%m/%Y")
+    fecha_archivo = fecha_dt.strftime("%d-%m-%Y")
+
+    safe_name = (alumno or "alumno").replace(" ", "_")
+    fname = os.path.join(PDFS_DIR, f"informe_{safe_name}_{fecha_archivo}.pdf")
+
+    doc = SimpleDocTemplate(
+        fname,
+        pagesize=A4,
+        rightMargin=2 * cm,
+        leftMargin=2 * cm,
+        topMargin=2.5 * cm,
+        bottomMargin=2 * cm,
+    )
+    elements = []
+
+    titulo = ParagraphStyle(name="Titulo", fontName="Helvetica-Bold", fontSize=16, alignment=TA_CENTER, spaceAfter=20)
+    subtitulo = ParagraphStyle(name="Subtitulo", fontName="Helvetica", fontSize=12, alignment=TA_CENTER, spaceAfter=12)
+    bloque_titulo = ParagraphStyle(name="BloqueTitulo", fontName="Helvetica-Bold", fontSize=12, alignment=TA_LEFT, spaceAfter=6)
+    bloque_texto = ParagraphStyle(name="BloqueTexto", fontName="Helvetica", fontSize=10, alignment=TA_LEFT, leading=14)
+
+    elements.append(Paragraph("Residència Reina Sofia", titulo))
+    elements.append(Paragraph(f"<b>Informe del dia {fecha_formateada}</b>", subtitulo))
+    elements.append(Spacer(1, 18))
+
+    elements.append(Paragraph(f"<b>Nom de l'alumne/a:</b> {alumno}", bloque_texto))
+    elements.append(Spacer(1, 12))
+
+    contenido_html = (contenido or "—").replace("\n", "<br/>")
+    data = [
+        [Paragraph("<b>Contingut</b>", bloque_titulo)],
+        [Paragraph(contenido_html, bloque_texto)],
+    ]
+    tabla = Table(data, colWidths=[16 * cm])
+    tabla.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 1, colors.black),
+        ("INNERPADDING", (0, 0), (-1, -1), 6),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+    ]))
+    elements.append(tabla)
+
+    doc.build(elements)
+    return fname
+
+
+def enviar_correo(asunto, cuerpo, lista_pdfs):
+    import os
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.application import MIMEApplication
+
+    try:
+        EMAIL_FROM = st.secrets["EMAIL_FROM"]
+        EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
+        EMAIL_TO = st.secrets["EMAIL_TO"]
+    except Exception:
+        st.error("Falten secrets a .streamlit/secrets.toml (EMAIL_FROM, EMAIL_PASSWORD, EMAIL_TO)")
+        return False
+
+    msg = MIMEMultipart()
+    msg["From"] = EMAIL_FROM
+    msg["To"] = EMAIL_TO
+    msg["Subject"] = asunto
+    msg.attach(MIMEText(cuerpo, "plain"))
+
+    for path in (lista_pdfs or []):
+        with open(path, "rb") as f:
+            part = MIMEApplication(f.read(), Name=os.path.basename(path))
+        part["Content-Disposition"] = f'attachment; filename="{os.path.basename(path)}"'
+        msg.attach(part)
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(EMAIL_FROM, EMAIL_PASSWORD)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        st.error(f"❌ Error en enviar el correu: {e}")
+        return False
 
 
 # app_dataverse.py - Bloque 10
