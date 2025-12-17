@@ -1753,6 +1753,503 @@ def _recopilar_taxis_en_rang(desde, hasta):
     return filas
 
 
+# =========================================================
+# app_dataverse.py - BLOQUE 9
+# -----------------------
+# Consultes i Històrics (Dataverse)
+# =========================================================
+
+import re
+from reportlab.lib.units import cm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.styles import ParagraphStyle
+
+
+# =====================================================
+#   DETECCIÓ I EXTRACCIÓ DE MENCIONS
+# =====================================================
+
+def extraer_menciones_de(alumno: str, texto: str) -> list[str]:
+    """
+    Retorna una llista de línies on apareix l'esportista.
+    Detecta:
+      - l'àlies definit (ALIAS_DEPORTISTAS)
+      - o un @nom (nom de pila)
+    """
+    if not texto or not alumno:
+        return []
+
+    alias = (ALIAS_DEPORTISTAS.get(alumno, "") or "").strip()
+    alias_lower = alias.lower() if alias else ""
+    nombre_pila = (alumno.split()[0] if alumno.split() else alumno).lower()
+
+    trozos: list[str] = []
+    for linea in (texto or "").splitlines():
+        linea_str = (linea or "").strip()
+        linea_lower = linea_str.lower()
+
+        te_alias = bool(alias_lower) and (alias_lower in linea_lower)
+        te_nom = f"@{nombre_pila}" in linea_lower
+
+        if te_alias or te_nom:
+            trozos.append(linea_str)
+
+    return trozos
+
+
+def hay_mencion_de(alumno: str, texto: str) -> bool:
+    return len(extraer_menciones_de(alumno, texto)) > 0
+
+
+# =====================================================
+#   CONSULTAR INFORME INDIVIDUAL I MENCIONS (Dataverse)
+# =====================================================
+
+def consultar_informe_individual():
+    st.header("📄 Consultar informació d'un esportista")
+
+    if not ALUMNOS:
+        cargar_alumnos_desde_dataverse()
+
+    alumno_lista = [""] + ALUMNOS
+    alumno = st.selectbox("Seleccionar esportista", alumno_lista, index=0)
+
+    tipo = st.radio(
+        "Tipus de consulta",
+        ["Informes individuals", "Mencions als informes generals"],
+        horizontal=True
+    )
+
+    if not alumno:
+        st.info("Seleccionau un esportista per consultar la informació.")
+        return
+
+    # 1) INFORMES INDIVIDUALS
+    if tipo == "Informes individuals":
+        try:
+            # Devuelve [(fecha_txt_ddmmyyyy, contenido), ...]
+            registros = DV.get_informes_individuales_por_alumno(alumno)
+        except Exception as e:
+            st.error(f"Error llegint informes individuals de Dataverse: {e}")
+            registros = []
+
+        if not registros:
+            st.info("No hi ha informes individuals per aquest esportista.")
+        else:
+            for fecha_txt, contenido in registros:
+                fecha_mostrar = fecha_txt or "—"
+                st.markdown(
+                    f"""
+                    <div style="border:1px solid #cccccc; border-radius:6px; padding:12px; margin-bottom:12px;">
+                        <strong>📅 {fecha_mostrar}</strong><br><br>
+                        <pre style="white-space:pre-wrap; margin:0;">{contenido or "—"}</pre>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+    # 2) MENCIONS EN INFORMES GENERALS
+    else:
+        try:
+            informes = DV.get_informes_generales_todos()
+        except Exception as e:
+            st.error(f"Error llegint informes generals de Dataverse: {e}")
+            informes = []
+
+        menciones: list[tuple[str, str, dict]] = []
+
+        for rec in informes:
+            fecha_txt = rec.get("fecha") or ""
+            cuidador = rec.get("cuidador") or ""
+            entradas = rec.get("entradas") or ""
+            mantenimiento = rec.get("mantenimiento") or ""
+            temas = rec.get("temas") or ""
+
+            campos: dict[str, str] = {}
+
+            frags_e = extraer_menciones_de(alumno, entradas)
+            if frags_e:
+                campos["Informe del dia"] = "\n".join(frags_e)
+
+            frags_m = extraer_menciones_de(alumno, mantenimiento)
+            if frags_m:
+                campos["Notes per direcció, manteniment i neteja"] = "\n".join(frags_m)
+
+            frags_t = extraer_menciones_de(alumno, temas)
+            if frags_t:
+                campos["Pícnics pel dia següent"] = "\n".join(frags_t)
+
+            if campos:
+                menciones.append((fecha_txt, cuidador, campos))
+
+        if not menciones:
+            st.info("No hi ha mencions d'aquest esportista als informes generals.")
+        else:
+            for fecha_txt, cuidador, campos in menciones:
+                fecha_mostrar = fecha_txt or "—"
+                st.markdown(f"### 📅 {fecha_mostrar} — 🧑‍💼 {cuidador or '—'}")
+
+                for titulo, contenido in campos.items():
+                    st.markdown(
+                        f"""
+                        <div style="border:1px solid #bbbbbb; border-radius:6px; padding:10px; margin-bottom:8px;">
+                            <strong>{titulo}</strong><br>
+                            <pre style="white-space:pre-wrap; margin:0;">{contenido or "—"}</pre>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+                st.divider()
+
+    if st.button("🏠 Tornar al menú", key="volver_menu_individual_consulta"):
+        st.session_state["vista_actual"] = "menu"
+        st.rerun()
+
+
+# =====================================================
+#   CONSULTAR INFORME GENERAL (Dataverse)
+# =====================================================
+
+def consultar_informe_general():
+    st.header("🔎 Consultar informe general")
+
+    fecha_sel = st.date_input(
+        "Selecciona la data de l'informe",
+        value=date.today(),
+        key="fecha_consulta_general"
+    )
+    fecha_iso = fecha_sel.isoformat()
+    fecha_mostrar = fecha_sel.strftime("%d/%m/%Y")
+    st.markdown(f"**Data seleccionada:** {fecha_mostrar}")
+
+    try:
+        informe = DV.get_informe_general(fecha_iso)
+    except Exception as e:
+        st.error(f"Error llegint informe general des de Dataverse: {e}")
+        informe = None
+
+    if not informe:
+        st.info(f"No hi ha informe general guardat a Dataverse per a {fecha_mostrar}.")
+        if st.button("🏠 Tornar al menú", key="volver_menu_general_consulta_sense_informe"):
+            st.session_state["vista_actual"] = "menu"
+            st.rerun()
+        return
+
+    cuidador = informe.get("cuidador") or ""
+    entradas = informe.get("entradas") or ""
+    mantenimiento = informe.get("mantenimiento") or ""
+    temas = informe.get("temas") or ""
+    informe_id = informe.get("id")
+
+    try:
+        taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
+    except Exception as e:
+        st.error(f"Error llegint taxis de Dataverse: {e}")
+        taxis_list = []
+
+    st.markdown(
+        f"""
+        <div style="border:1px solid #cccccc; border-radius:6px; padding:10px; margin-bottom:10px;">
+            <strong>Cuidador/a</strong><br>{cuidador or "—"}
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    for titulo, contenido in [
+        ("Informe del dia", entradas),
+        ("Notes per direcció, manteniment i neteja", mantenimiento),
+        ("Pícnics pel dia següent", temas),
+    ]:
+        st.markdown(
+            f"""
+            <div style="border:1px solid #cccccc; border-radius:6px; padding:10px; margin-bottom:10px;">
+                <strong>{titulo}</strong><br>
+                <pre style="white-space:pre-wrap; margin:0;">{contenido or "—"}</pre>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    if taxis_list:
+        st.markdown(
+            """
+            <div style="border:1px solid #cccccc; border-radius:6px; padding:10px; margin-bottom:10px;">
+                <strong>Taxis</strong>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        st.table(pd.DataFrame(taxis_list))
+
+    if st.button("🏠 Tornar al menú", key="volver_menu_general_consulta"):
+        st.session_state["vista_actual"] = "menu"
+        st.rerun()
+
+
+# =====================================================
+#   HISTÒRIC INDIVIDUAL (AMB MENCIONS) – Dataverse
+# =====================================================
+
+def generar_pdf_historico_individual(alumno, desde, hasta):
+    desde_iso = desde.strftime("%Y-%m-%d")
+    hasta_iso = hasta.strftime("%Y-%m-%d")
+
+    fname = os.path.join(
+        PDFS_DIR,
+        f"historico_individual_{alumno.replace(' ','_')}_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
+    )
+
+    doc = SimpleDocTemplate(
+        fname, pagesize=A4,
+        rightMargin=2*cm, leftMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2*cm
+    )
+
+    estilo_titulo = ParagraphStyle(name="Titulo", fontName="Helvetica-Bold", fontSize=16, alignment=TA_CENTER, spaceAfter=6)
+    estilo_sub = ParagraphStyle(name="Sub", fontName="Helvetica", fontSize=12, alignment=TA_CENTER, spaceAfter=10)
+    estilo_fecha = ParagraphStyle(name="Fecha", fontName="Helvetica-Bold", fontSize=13, spaceAfter=6)
+    estilo_titulo_bloque = ParagraphStyle(name="TituloBloque", fontName="Helvetica-Bold", fontSize=12, spaceAfter=4)
+    estilo_texto = ParagraphStyle(name="Texto", fontName="Helvetica", fontSize=10, leading=14)
+
+    elements = []
+    elements.append(Paragraph("Residència Reina Sofia", estilo_titulo))
+    elements.append(Paragraph(f"Històric individual - {alumno}", estilo_sub))
+    elements.append(Spacer(1, 8))
+
+    # Informes individuals (ja venen del servidor ordenats desc; i la data ja ve en dd/mm/yyyy)
+    try:
+        todos_ind = DV.get_informes_individuales_por_alumno(alumno)
+    except Exception as e:
+        st.error(f"Error llegint informes individuals de Dataverse: {e}")
+        todos_ind = []
+
+    # Filtrar per rang (comparant ISO del rang contra Dataverse al servidor no és possible aquí,
+    # però com a mínim fem filtre tolerant intentant convertir dd/mm/yyyy -> ISO)
+    registros_ind = []
+    for fecha_txt, contenido in todos_ind:
+        if not fecha_txt:
+            continue
+        try:
+            iso = datetime.strptime(fecha_txt, "%d/%m/%Y").strftime("%Y-%m-%d")
+        except Exception:
+            iso = ""
+        if iso and (desde_iso <= iso <= hasta_iso):
+            registros_ind.append((fecha_txt, contenido))
+
+    # Mencions a informes generals (ja ve filtrat per rang des del servidor)
+    try:
+        informes_gen = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+    except Exception as e:
+        st.error(f"Error llegint informes generals de Dataverse: {e}")
+        informes_gen = []
+
+    menciones = []
+    for rec in informes_gen:
+        fecha_txt = rec.get("fecha") or ""
+        cuidador = rec.get("cuidador") or ""
+        entradas = rec.get("entradas") or ""
+        mantenimiento = rec.get("mantenimiento") or ""
+        temas = rec.get("temas") or ""
+
+        campos = {}
+        frags_e = extraer_menciones_de(alumno, entradas)
+        if frags_e:
+            campos["Informe del dia"] = frags_e
+        frags_m = extraer_menciones_de(alumno, mantenimiento)
+        if frags_m:
+            campos["Notes per direcció, manteniment i neteja"] = frags_m
+        frags_t = extraer_menciones_de(alumno, temas)
+        if frags_t:
+            campos["Pícnics pel dia següent"] = frags_t
+
+        if campos:
+            menciones.append((fecha_txt, cuidador, campos))
+
+    if not registros_ind and not menciones:
+        return None
+
+    # A) Informes individuals
+    if registros_ind:
+        elements.append(Paragraph("A) Informes individuals", estilo_titulo_bloque))
+        elements.append(Spacer(1, 6))
+        for fecha_txt, contenido in registros_ind:
+            elements.append(Paragraph(f"Informe del dia {fecha_txt}", estilo_fecha))
+            elements.append(Paragraph((contenido or "—").replace("\n", "<br/>"), estilo_texto))
+            elements.append(Spacer(1, 8))
+            elements.append(Paragraph("<hr/>", estilo_texto))
+            elements.append(Spacer(1, 4))
+
+    # B) Mencions generals
+    if menciones:
+        elements.append(Spacer(1, 10))
+        elements.append(Paragraph("B) Mencions als informes generals", estilo_titulo_bloque))
+        elements.append(Spacer(1, 6))
+
+        for fecha_txt, cuidador, campos in menciones:
+            elements.append(Paragraph(f"Informe general del dia {fecha_txt or '—'}", estilo_fecha))
+            elements.append(Paragraph(f"<b>Cuidador/a:</b> {cuidador or '—'}", estilo_texto))
+            elements.append(Spacer(1, 4))
+
+            for camp, fragments in campos.items():
+                elements.append(Paragraph(f"<b>{camp}:</b>", estilo_titulo_bloque))
+                for frag in fragments:
+                    elements.append(Paragraph((frag or "—").replace("\n", "<br/>"), estilo_texto))
+                    elements.append(Spacer(1, 2))
+
+            elements.append(Spacer(1, 8))
+            elements.append(Paragraph("<hr/>", estilo_texto))
+            elements.append(Spacer(1, 4))
+
+    doc.build(elements)
+    return fname
+
+
+# =====================================================
+#   HISTÒRIC GENERAL – Dataverse
+# =====================================================
+
+def generar_pdf_historico_general(desde, hasta):
+    desde_iso = desde.strftime("%Y-%m-%d")
+    hasta_iso = hasta.strftime("%Y-%m-%d")
+
+    fname = os.path.join(
+        PDFS_DIR,
+        f"historico_general_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
+    )
+
+    doc = SimpleDocTemplate(
+        fname, pagesize=A4,
+        rightMargin=2*cm, leftMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2*cm
+    )
+
+    estilo_fecha = ParagraphStyle(name="Fecha", fontName="Helvetica-Bold", fontSize=13, spaceAfter=6)
+    estilo_titulo = ParagraphStyle(name="Titulo", fontName="Helvetica-Bold", fontSize=12, spaceAfter=4)
+    estilo_texto = ParagraphStyle(name="Texto", fontName="Helvetica", fontSize=10, leading=14)
+
+    try:
+        registros = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+    except Exception as e:
+        st.error(f"Error llegint informes generals de Dataverse: {e}")
+        registros = []
+
+    if not registros:
+        return None
+
+    elements = []
+    elements.append(Paragraph(
+        "Residència Reina Sofia",
+        ParagraphStyle(name="TituloCab", alignment=TA_CENTER, fontName="Helvetica-Bold", fontSize=16)
+    ))
+    elements.append(Paragraph(
+        "Històric d'informes generals",
+        ParagraphStyle(name="SubCab", alignment=TA_CENTER, fontName="Helvetica", fontSize=12)
+    ))
+    elements.append(Spacer(1, 12))
+
+    for rec in registros:
+        fecha_txt = rec.get("fecha") or ""
+        cuidador = rec.get("cuidador") or ""
+        entradas = rec.get("entradas") or ""
+        mantenimiento = rec.get("mantenimiento") or ""
+        temas = rec.get("temas") or ""
+        informe_id = rec.get("id")
+
+        try:
+            taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
+        except Exception as e:
+            st.error(f"Error llegint taxis de Dataverse: {e}")
+            taxis_list = []
+
+        elements.append(Paragraph(f"Informe del dia {fecha_txt or '—'}", estilo_fecha))
+        elements.append(Paragraph(f"<b>Cuidador/a:</b> {cuidador or '—'}", estilo_texto))
+        elements.append(Spacer(1, 4))
+
+        elements.append(Paragraph("<b>Informe del dia:</b>", estilo_titulo))
+        elements.append(Paragraph((entradas or '—').replace("\n", "<br/>"), estilo_texto))
+
+        elements.append(Paragraph("<b>Notes per direcció, manteniment i neteja:</b>", estilo_titulo))
+        elements.append(Paragraph((mantenimiento or '—').replace("\n", "<br/>"), estilo_texto))
+
+        elements.append(Paragraph("<b>Pícnics pel dia següent:</b>", estilo_titulo))
+        elements.append(Paragraph((temas or '—').replace("\n", "<br/>"), estilo_texto))
+
+        if taxis_list:
+            data = [["Data servei", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
+            for t in taxis_list:
+                data.append([
+                    t.get("Fecha", "") or "",
+                    t.get("Hora", "") or "",
+                    t.get("Recogida", "") or "",
+                    t.get("Destino", "") or "",
+                    t.get("Deportistas", "") or "",
+                    t.get("Observaciones", "") or "",
+                ])
+
+            table = Table(data, colWidths=[2.3*cm, 2.3*cm, 3*cm, 3*cm, 3*cm, 3*cm])
+            table.setStyle(TableStyle([
+                ("GRID", (0,0), (-1,-1), 0.5, colors.black),
+                ("BACKGROUND", (0,0), (-1,0), colors.whitesmoke),
+                ("VALIGN", (0,0), (-1,-1), "TOP"),
+                ("FONTNAME", (0,0), (-1,-1), "Helvetica"),
+                ("FONTSIZE", (0,0), (-1,-1), 8),
+            ]))
+            elements.append(Spacer(1, 6))
+            elements.append(table)
+
+        elements.append(Spacer(1, 12))
+        elements.append(Paragraph("<hr/>", estilo_texto))
+
+    doc.build(elements)
+    return fname
+
+
+# =====================================================
+#   HISTÒRIC TAXIS (PDF + DataFrame) – Dataverse
+# =====================================================
+
+def _recopilar_taxis_en_rang(desde, hasta):
+    """
+    Retorna files: [data_informe_ddmmyyyy, data_servei_ddmmyyyy, hora, recollida, destí, esportistes, observacions]
+    """
+    desde_iso = desde.strftime("%Y-%m-%d")
+    hasta_iso = hasta.strftime("%Y-%m-%d")
+
+    try:
+        informes = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+    except Exception as e:
+        st.error(f"Error llegint informes generals per a taxis de Dataverse: {e}")
+        informes = []
+
+    filas = []
+    for rec in informes:
+        fecha_informe_txt = rec.get("fecha") or ""
+        informe_id = rec.get("id")
+
+        try:
+            taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
+        except Exception as e:
+            st.error(f"Error llegint taxis de Dataverse: {e}")
+            taxis_list = []
+
+        for t in taxis_list:
+            filas.append([
+                fecha_informe_txt,
+                t.get("Fecha", "") or "",
+                t.get("Hora", "") or "",
+                t.get("Recogida", "") or "",
+                t.get("Destino", "") or "",
+                t.get("Deportistas", "") or "",
+                t.get("Observaciones", "") or "",
+            ])
+
+    return filas
+
+
 def generar_pdf_historico_taxis(desde, hasta):
     filas = _recopilar_taxis_en_rang(desde, hasta)
     if not filas:
@@ -1764,30 +2261,15 @@ def generar_pdf_historico_taxis(desde, hasta):
     )
 
     doc = SimpleDocTemplate(
-        fname,
-        pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm
+        fname, pagesize=A4,
+        rightMargin=2*cm, leftMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2*cm
     )
+
+    estilo_titulo = ParagraphStyle(name="TituloTaxis", fontName="Helvetica-Bold", fontSize=16, alignment=TA_CENTER, spaceAfter=8)
+    estilo_sub = ParagraphStyle(name="SubTaxis", fontName="Helvetica", fontSize=12, alignment=TA_CENTER, spaceAfter=12)
+
     elements = []
-
-    estilo_titulo = ParagraphStyle(
-        name="TituloTaxis",
-        fontName="Helvetica-Bold",
-        fontSize=16,
-        alignment=TA_CENTER,
-        spaceAfter=8
-    )
-    estilo_sub = ParagraphStyle(
-        name="SubTaxis",
-        fontName="Helvetica",
-        fontSize=12,
-        alignment=TA_CENTER,
-        spaceAfter=12
-    )
-
     elements.append(Paragraph("Residència Reina Sofia", estilo_titulo))
     elements.append(Paragraph(
         f"Històric de serveis de taxi ({desde.strftime('%d/%m/%Y')} - {hasta.strftime('%d/%m/%Y')})",
@@ -1817,16 +2299,9 @@ def obtener_historico_taxis_df(desde, hasta):
     if not filas:
         return None
 
-    columnas = [
-        "Data informe",
-        "Data servei",
-        "Hora",
-        "Recollida",
-        "Destí",
-        "Esportistes",
-        "Observacions"
-    ]
+    columnas = ["Data informe", "Data servei", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]
     return pd.DataFrame(filas, columns=columnas)
+
 
 
 # app_dataverse.py - Bloque 10
