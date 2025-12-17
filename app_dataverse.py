@@ -1259,8 +1259,23 @@ def formulario_informe_general():
                 "Revisa la configuració de la taula d'usuaris a Dataverse."
             )
             return
+    def _texto_plano(v):
+        if v is None:
+            return ""
+        if isinstance(v, (list, tuple, set)):
+            return "\n".join(str(x) for x in v if x is not None)
+        return str(v)
 
-        taxis_records = st.session_state["taxis_df"].to_dict("records")
+    taxis_records = []
+    for t in st.session_state["taxis_df"].to_dict("records"):
+        taxis_records.append({
+            "Fecha": _texto_plano(t.get("Fecha")),
+            "Hora": _texto_plano(t.get("Hora")),
+            "Recogida": _texto_plano(t.get("Recogida")),
+            "Destino": _texto_plano(t.get("Destino")),
+            "Deportistas": _texto_plano(t.get("Deportistas")),
+            "Observaciones": _texto_plano(t.get("Observaciones")),
+        })
         info["taxis"] = taxis_records
 
         try:
