@@ -1696,6 +1696,137 @@ def cambiar_contraseña():
         if st.button("🏠 Tornar al menú", use_container_width=True):
             st.session_state["vista_actual"] = "menu"
             st.rerun()
+# =====================================================
+#   HISTÒRIC TAXIS (PDF + DataFrame) – Dataverse
+#   (Pegar ANTES de main())
+# =====================================================
+
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.units import cm
+
+
+def _recopilar_taxis_en_rang(desde, hasta):
+    """
+    Retorna una llista de files amb tots els taxis en el rang de dates (Dataverse).
+    Cada fila és: [data_informe, data_servei, hora, recollida, destí, esportistes, observacions]
+    """
+    desde_iso = desde.strftime("%Y-%m-%d")
+    hasta_iso = hasta.strftime("%Y-%m-%d")
+
+    try:
+        informes = DV.get_informes_generales_rango(desde_iso, hasta_iso)
+    except Exception as e:
+        st.error(f"Error llegint informes generals per a taxis de Dataverse: {e}")
+        informes = []
+
+    filas = []
+
+    for rec in informes:
+        fecha_informe = rec.get("fecha") or ""   # ojo: en tu DV ya lo devuelves en dd/mm/yyyy
+        informe_id = rec.get("id")
+
+        try:
+            taxis_list = DV.get_taxis_by_informe(informe_id) if informe_id else []
+        except Exception as e:
+            st.error(f"Error llegint taxis de Dataverse: {e}")
+            taxis_list = []
+
+        # Fecha informe ya viene en dd/mm/yyyy si usas dv_date en DV.get_informes_generales_rango()
+        fecha_inf_str = fecha_informe or ""
+
+        for t in taxis_list:
+            fecha_servicio_str = t.get("Fecha", "") or ""  # ya viene dd/mm/yyyy por dv_date
+
+            filas.append([
+                fecha_inf_str,
+                fecha_servicio_str,
+                t.get("Hora", "") or "",
+                t.get("Recogida", "") or "",
+                t.get("Destino", "") or "",
+                t.get("Deportistas", "") or "",
+                t.get("Observaciones", "") or "",
+            ])
+
+    return filas
+
+
+def generar_pdf_historico_taxis(desde, hasta):
+    filas = _recopilar_taxis_en_rang(desde, hasta)
+    if not filas:
+        return None
+
+    fname = os.path.join(
+        PDFS_DIR,
+        f"historico_taxis_{desde.strftime('%d-%m-%Y')}_a_{hasta.strftime('%d-%m-%Y')}.pdf"
+    )
+
+    doc = SimpleDocTemplate(
+        fname,
+        pagesize=A4,
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2*cm,
+        bottomMargin=2*cm
+    )
+    elements = []
+
+    estilo_titulo = ParagraphStyle(
+        name="TituloTaxis",
+        fontName="Helvetica-Bold",
+        fontSize=16,
+        alignment=TA_CENTER,
+        spaceAfter=8
+    )
+    estilo_sub = ParagraphStyle(
+        name="SubTaxis",
+        fontName="Helvetica",
+        fontSize=12,
+        alignment=TA_CENTER,
+        spaceAfter=12
+    )
+
+    elements.append(Paragraph("Residència Reina Sofia", estilo_titulo))
+    elements.append(Paragraph(
+        f"Històric de serveis de taxi ({desde.strftime('%d/%m/%Y')} - {hasta.strftime('%d/%m/%Y')})",
+        estilo_sub
+    ))
+    elements.append(Spacer(1, 8))
+
+    data = [["Data informe", "Data servei", "Hora", "Recollida", "Destí", "Esportistes", "Observacions"]]
+    data.extend(filas)
+
+    table = Table(data, colWidths=[2.5*cm, 2.5*cm, 2*cm, 3*cm, 3*cm, 3*cm, 3*cm])
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+    ]))
+
+    elements.append(table)
+    doc.build(elements)
+    return fname
+
+
+def obtener_historico_taxis_df(desde, hasta):
+    filas = _recopilar_taxis_en_rang(desde, hasta)
+    if not filas:
+        return None
+
+    columnas = [
+        "Data informe",
+        "Data servei",
+        "Hora",
+        "Recollida",
+        "Destí",
+        "Esportistes",
+        "Observacions"
+    ]
+    return pd.DataFrame(filas, columns=columnas)
 
 
 # app_dataverse.py - Bloque 10
