@@ -1087,9 +1087,19 @@ def formulario_informe_general():
 
     st.header("🗓️ Introduir informe general")
 
-    if not ALUMNOS:
-        cargar_alumnos_desde_dataverse()
-
+    # -----------------------
+    # ESTAT INICIAL
+    # -----------------------
+    if "fecha_cargada" not in st.session_state:
+        st.session_state["fecha_cargada"] = None
+    if "bloqueado" not in st.session_state:
+        st.session_state["bloqueado"] = False
+    if "confirmar_overwrite" not in st.session_state:
+        st.session_state["confirmar_overwrite"] = False
+    if "taxis_df" not in st.session_state:
+        st.session_state["taxis_df"] = pd.DataFrame(
+            columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observaciones"]
+        )
     if "informe_general" not in st.session_state:
         st.session_state["informe_general"] = {
             "cuidador": "",
@@ -1099,28 +1109,21 @@ def formulario_informe_general():
             "taxis": []
         }
 
-    if "fecha_cargada" not in st.session_state:
-        st.session_state["fecha_cargada"] = None
-    if "bloqueado" not in st.session_state:
-        st.session_state["bloqueado"] = False
-    if "taxis_df" not in st.session_state:
-        st.session_state["taxis_df"] = pd.DataFrame(
-            columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observaciones"]
-        )
-    if "confirmar_salir_general" not in st.session_state:
-        st.session_state["confirmar_salir_general"] = False
-    if "informe_general_id" not in st.session_state:
-        st.session_state["informe_general_id"] = None
+    info = st.session_state["informe_general"]
 
-    # --- Data de l'informe ---
-    fecha_sel = st.date_input("Data de l'informe", value=date.today(), key="fecha_general")
-    fecha_iso = fecha_sel.isoformat()
+    # -----------------------
+    # DATA
+    # -----------------------
+    fecha_sel = st.date_input("Data de l'informe", value=date.today())
+    fecha_iso = fecha_sel.strftime("%Y-%m-%d")
     fecha_mostrar = fecha_sel.strftime("%d/%m/%Y")
-    st.markdown(f"**Data seleccionada:** {fecha_mostrar}")
 
-    # --- Carrega des de Dataverse si canvi de data ---
+    # -----------------------
+    # CÀRREGA INFORME EXISTENT
+    # -----------------------
     if st.session_state["fecha_cargada"] != fecha_iso:
         st.session_state["fecha_cargada"] = fecha_iso
+        st.session_state["confirmar_overwrite"] = False
 
         try:
             informe = DV.get_informe_general(fecha_iso)
@@ -1129,70 +1132,46 @@ def formulario_informe_general():
             informe = None
 
         if informe:
-            st.session_state["informe_general"] = {
-                "cuidador": informe.get("cuidador", "") or "",
-                "entradas": informe.get("entradas", "") or "",
-                "mantenimiento": informe.get("mantenimiento", "") or "",
-                "temas": informe.get("temas", "") or "",
-                "taxis": []
-            }
-            informe_id = informe.get("id")
-            st.session_state["informe_general_id"] = informe_id
+            info["cuidador"] = informe.get("cuidador", "")
+            info["entradas"] = informe.get("entradas", "")
+            info["mantenimiento"] = informe.get("mantenimiento", "")
+            info["temas"] = informe.get("temas", "")
+            st.session_state["informe_general_id"] = informe.get("id")
 
-            taxis = []
-            if informe_id:
-                try:
-                    taxis = DV.get_taxis_by_informe(informe_id)
-                except Exception as e:
-                    st.error(f"Error llegint taxis des de Dataverse: {e}")
-                    taxis = []
+            try:
+                taxis = DV.get_taxis_por_fecha(fecha_iso)
+            except Exception:
+                taxis = []
 
-            st.session_state["informe_general"]["taxis"] = taxis
             st.session_state["taxis_df"] = _ensure_taxis_df_schema(pd.DataFrame(taxis))
             st.session_state["bloqueado"] = True
         else:
-            cuidador_sessio = obtener_cuidador_para_usuario_session()
-            st.session_state["informe_general"] = {
-                "cuidador": cuidador_sessio,
-                "entradas": "",
-                "mantenimiento": "",
-                "temas": "",
-                "taxis": []
-            }
-            st.session_state["taxis_df"] = _ensure_taxis_df_schema(
-                pd.DataFrame(columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observations"])
-                if False else pd.DataFrame(columns=["Fecha", "Hora", "Recogida", "Destino", "Deportistas", "Observaciones"])
-            )
-            st.session_state["bloqueado"] = False
+            info["entradas"] = ""
+            info["mantenimiento"] = ""
+            info["temas"] = ""
+            st.session_state["taxis_df"] = _ensure_taxis_df_schema(pd.DataFrame([]))
             st.session_state["informe_general_id"] = None
+            st.session_state["bloqueado"] = False
 
-        st.session_state["confirmar_salir_general"] = False
-
-    info = st.session_state["informe_general"]
-    bloqueado = st.session_state["bloqueado"]
-
-    with st.expander("👀 Consultar àlies d'esportistes (@)", expanded=False):
-        st.caption("Fes servir aquests àlies al text: @ainaR, @marcA…")
-        df_alias = pd.DataFrame(
-            [{"Esportista": n, "Àlies": ALIAS_DEPORTISTAS.get(n, "")} for n in ALUMNOS]
-        )
-        st.dataframe(df_alias, use_container_width=True, hide_index=True)
-
-    if bloqueado:
-        st.info("🔒 Aquest informe ja està desat i bloquejat per a l'edició.")
-        if st.button("✏️ Editar informe desat"):
+    # -----------------------
+    # CONTROL BLOQUEIG
+    # -----------------------
+    if st.session_state.get("informe_general_id") and st.session_state["bloqueado"]:
+        st.info("🔒 Aquest informe ja existeix i està bloquejat.")
+        if st.button("✏️ Editar informe"):
             st.session_state["bloqueado"] = False
             st.rerun()
 
+    disabled = st.session_state["bloqueado"]
+
+    # -----------------------
+    # FORMULARI
+    # -----------------------
     submitted_enviar = False
     submitted_sense_enviar = False
     submitted_picnic = False
 
-    # =========================
-    # FORMULARI
-    # =========================
     with st.form("form_informe_general", clear_on_submit=False):
-        disabled = bloqueado
 
         cuidador_txt = st.text_input(
             "Cuidador/a",
@@ -1201,224 +1180,101 @@ def formulario_informe_general():
         )
 
         entradas_txt = st.text_area(
-            "Informe del dia",
-            value=info["entradas"],
+            "Entrades / sortides",
+            value=info.get("entradas", ""),
             height=120,
             disabled=disabled
         )
 
         mantenimiento_txt = st.text_area(
-            "Notes per direcció, manteniment i neteja",
-            value=info["mantenimiento"],
+            "Manteniment / incidències",
+            value=info.get("mantenimiento", ""),
             height=120,
             disabled=disabled
         )
 
-        # =========================
-        # PÍCNICS + BOTÓ ENVIAR CORREU
-        # =========================
         temas_txt = st.text_area(
             "Pícnics pel dia següent",
-            value=info["temas"],
+            value=info.get("temas", ""),
             height=120,
             disabled=disabled,
             key="picnics_txt"
         )
 
+        # -------- Estat enviament pícnics --------
         def _hash_text(s: str) -> str:
             return hashlib.sha256((s or "").strip().encode("utf-8")).hexdigest()
 
-        picnic_key_hash = f"picnic_sent_hash__{fecha_iso}"
-        actual_hash = _hash_text(st.session_state.get("picnics_txt", temas_txt))
-        sent_hash = st.session_state.get(picnic_key_hash, "")
+        picnic_key = f"picnic_sent_hash__{fecha_iso}"
+        actual_hash = _hash_text(st.session_state.get("picnics_txt", ""))
+        sent_hash = st.session_state.get(picnic_key, "")
 
         ja_enviat_igual = bool(sent_hash) and sent_hash == actual_hash
-        cal_rectificar = bool(sent_hash) and sent_hash != actual_hash and (st.session_state.get("picnics_txt", "") or "").strip() != ""
+        cal_rectificar = bool(sent_hash) and sent_hash != actual_hash and actual_hash != ""
 
-        c_mail_1, c_mail_2 = st.columns([1, 3])
-        with c_mail_1:
-            if ja_enviat_igual:
-                submitted_picnic = st.form_submit_button(
-                    "✅ Enviat",
-                    disabled=True,
-                    use_container_width=True
-                )
-            else:
-                label = "📨 Enviar de nou" if cal_rectificar else "📨 Enviar"
-                submitted_picnic = st.form_submit_button(
-                    label,
-                    disabled=disabled or ((st.session_state.get("picnics_txt", "") or "").strip() == ""),
-                    use_container_width=True
-                )
-
-        with c_mail_2:
-            if cal_rectificar:
-                st.caption("Hi ha canvis respecte el darrer enviament. Si envies, l'assumpte acabarà amb **RECTIFICAT**.")
-            elif ja_enviat_igual:
-                st.caption("Ja s'ha enviat al restaurant amb aquest contingut.")
-            else:
-                st.caption("Envia aquest text al restaurant (2 destinataris des de secrets).")
-
-        # =========================
-        # TAXIS (ORIGINAL)
-        # =========================
+        # -------- TAXIS (original) --------
         with st.expander("🚕 Detalls dels taxis", expanded=True):
-            st.session_state["taxis_df"] = _ensure_taxis_df_schema(st.session_state.get("taxis_df"))
             taxis_df = st.data_editor(
                 st.session_state["taxis_df"],
                 num_rows="dynamic",
                 hide_index=True,
                 use_container_width=True,
                 disabled=disabled,
-                key="taxis_editor",
-                column_config={
-                    "Fecha": st.column_config.TextColumn("Data (dd/mm/aaaa)"),
-                    "Hora": st.column_config.TextColumn("Hora (hh:mm)"),
-                    "Recogida": st.column_config.TextColumn("Recollida"),
-                    "Destino": st.column_config.TextColumn("Destí"),
-                    "Deportistas": st.column_config.TextColumn("Esportistes"),
-                    "Observaciones": st.column_config.TextColumn("Observacions"),
-                }
+                key="taxis_editor"
             )
-
-            def normalizar_fecha(v):
-                v = "" if v is None else str(v)
-                v = v.replace("-", "/").replace(".", "/").strip()
-                if not v:
-                    return ""
-                p = v.split("/")
-                if len(p) == 3:
-                    d, m, a = p
-                    if len(a) == 2:
-                        a = "20" + a
-                    try:
-                        return datetime.strptime(f"{d}/{m}/{a}", "%d/%m/%Y").strftime("%d/%m/%Y")
-                    except Exception:
-                        return v
-                return v
-
-            def normalizar_hora(v):
-                v = "" if v is None else str(v)
-                v = v.strip().replace(".", ":").replace("h", ":").replace("H", ":")
-                if not v:
-                    return ""
-                if v.isdigit():
-                    if len(v) == 1:
-                        return f"0{v}:00"
-                    if len(v) == 2:
-                        return f"{v}:00"
-                    if len(v) == 3:
-                        return f"{v[0]}:{v[1:]}"
-                    if len(v) == 4:
-                        return f"{v[:2]}:{v[2:]}"
-                    return v
-                for fmt in ["%H:%M", "%H:%M:%S", "%H:%M:%S.%f"]:
-                    try:
-                        return datetime.strptime(v, fmt).strftime("%H:%M")
-                    except Exception:
-                        pass
-                return v
-
-            if "Fecha" in taxis_df.columns:
-                taxis_df["Fecha"] = taxis_df["Fecha"].apply(normalizar_fecha)
-            if "Hora" in taxis_df.columns:
-                taxis_df["Hora"] = taxis_df["Hora"].apply(normalizar_hora)
-
             st.session_state["taxis_df"] = _ensure_taxis_df_schema(taxis_df)
 
-        with st.expander("📑 Informes individuals d'aquest dia", expanded=False):
-            try:
-                alumnos_ind_dia = DV.get_alumnos_con_informe_en_fecha(fecha_iso)
-            except Exception as e:
-                st.error(f"Error llegint informes individuals del dia des de Dataverse: {e}")
-                alumnos_ind_dia = []
+        # -------- BOTONS --------
+        c1, c2, c3 = st.columns(3)
 
-            if alumnos_ind_dia:
-                st.caption("Esportistes que tenen informe individual per aquesta data:")
-                for a in alumnos_ind_dia:
-                    st.markdown(f"- {a}")
-            else:
-                st.caption("Per ara no hi ha informes individuals registrats per aquesta data.")
-
-        col_guardar_1, col_guardar_2 = st.columns(2)
-        with col_guardar_1:
+        with c1:
             submitted_enviar = st.form_submit_button("💾 Desar i enviar", disabled=disabled)
-        with col_guardar_2:
+        with c2:
             submitted_sense_enviar = st.form_submit_button("💾 Desar sense enviar", disabled=disabled)
+        with c3:
+            label = "✅ Correu pícnics enviat" if ja_enviat_igual else "📨 Enviar correu pícnics"
+            disabled_picnic = disabled or actual_hash == "" or ja_enviat_igual
+            submitted_picnic = st.form_submit_button(label, disabled=disabled_picnic)
 
-    # =========================
-    # ACCIÓ: ENVIAR PÍCNICS (fora del form)
-    # =========================
-    if submitted_picnic and not ja_enviat_igual and not bloqueado:
-        dies_setmana = ["dilluns", "dimarts", "dimecres", "dijous", "divendres", "dissabte", "diumenge"]
-        mesos = ["gener", "febrer", "març", "abril", "maig", "juny", "juliol", "agost", "setembre", "octubre", "novembre", "desembre"]
+        if cal_rectificar:
+            st.caption("⚠️ El text ha canviat. Si envies de nou, l’assumpte acabarà amb **RECTIFICAT**.")
 
-        fecha_picnic_dt = fecha_sel + timedelta(days=1)
-        dia_setmana = dies_setmana[fecha_picnic_dt.weekday()]
-        dia_mes = fecha_picnic_dt.day
-        mes_text = mesos[fecha_picnic_dt.month - 1]
+    # -----------------------
+    # ENVIAR CORREU PÍCNICS
+    # -----------------------
+    if submitted_picnic and not ja_enviat_igual and not disabled:
+        dies = ["dilluns", "dimarts", "dimecres", "dijous", "divendres", "dissabte", "diumenge"]
+        mesos = ["gener", "febrer", "març", "abril", "maig", "juny", "juliol",
+                 "agost", "setembre", "octubre", "novembre", "desembre"]
 
-        asunto_base = f"Picnics per demà {dia_setmana} {dia_mes} de {mes_text}"
+        data_picnic = fecha_sel + timedelta(days=1)
+        asunto_base = f"Picnics per demà {dies[data_picnic.weekday()]} {data_picnic.day} de {mesos[data_picnic.month-1]}"
         asunto = f"{asunto_base} - RECTIFICAT" if cal_rectificar else asunto_base
 
         cuerpo = (
             "Benvolguts senyors,\n"
             "Els residents que necessiten picnic demà són els següents:\n\n"
-            f"{(st.session_state.get('picnics_txt', '') or '').strip()}\n\n"
+            f"{st.session_state.get('picnics_txt', '').strip()}\n\n"
             "Atenatment,\n\n"
             "Residència Reina Sofia\n"
         )
 
         ok = enviar_correo_restaurant(asunto, cuerpo)
         if ok:
-            st.session_state[picnic_key_hash] = actual_hash
-            st.success("✅ Correu enviat al restaurant.")
+            st.session_state[picnic_key] = actual_hash
+            st.success("✅ Correu de pícnics enviat.")
             st.rerun()
 
-    # =========================
-    # DESAR INFORME (original)
-    # =========================
+    # -----------------------
+    # DESAR INFORME
+    # -----------------------
     if submitted_enviar or submitted_sense_enviar:
         info["cuidador"] = cuidador_txt
         info["entradas"] = entradas_txt
         info["mantenimiento"] = mantenimiento_txt
-        info["temas"] = st.session_state.get("picnics_txt", temas_txt)
+        info["temas"] = st.session_state.get("picnics_txt", "")
 
-        if not info["cuidador"]:
-            st.warning(
-                "⚠️ No s'ha pogut determinar el cuidador per aquesta sessió. "
-                "Revisa la configuració de la taula d'usuaris a Dataverse."
-            )
-            return
-
-        # --- SANEJAR taxis (evitar [..] i "..." a PDF/consultes i al guardar) ---
-        def _to_text(v) -> str:
-            if v is None:
-                return ""
-            try:
-                if isinstance(v, float) and pd.isna(v):
-                    return ""
-            except Exception:
-                pass
-            if isinstance(v, (list, tuple, set)):
-                return "\n".join(str(x) for x in v if x is not None)
-            return str(v)
-
-        taxis_records_raw = st.session_state["taxis_df"].to_dict("records")
-        taxis_records = [
-            {
-                "Fecha": _to_text(t.get("Fecha")).strip(),
-                "Hora": _to_text(t.get("Hora")).strip(),
-                "Recogida": _to_text(t.get("Recogida")).strip(),
-                "Destino": _to_text(t.get("Destino")).strip(),
-                "Deportistas": _to_text(t.get("Deportistas")).strip(),
-                "Observaciones": _to_text(t.get("Observaciones")).strip(),
-            }
-            for t in (taxis_records_raw or [])
-        ]
-
-        info["taxis"] = taxis_records
-        st.session_state["taxis_df"] = _ensure_taxis_df_schema(pd.DataFrame(taxis_records))
+        taxis_records = st.session_state["taxis_df"].to_dict("records")
 
         try:
             informe_id = DV.upsert_informe_general(
@@ -1428,60 +1284,26 @@ def formulario_informe_general():
                 info["mantenimiento"],
                 info["temas"],
             )
-            st.session_state["informe_general_id"] = informe_id
-
             DV.replace_taxis_for_informe(informe_id, fecha_iso, taxis_records)
-            alumnos = DV.get_alumnos_con_informe_en_fecha(fecha_iso)
-
         except Exception as e:
-            st.error(f"Error desant l'informe general a Dataverse: {e}")
+            st.error(f"Error desant l'informe: {e}")
             return
 
-        pdf = generar_pdf_general(
-            info["cuidador"], fecha_iso,
-            info["entradas"], info["mantenimiento"], info["temas"],
-            taxis_records, alumnos
-        )
-
         if submitted_enviar:
+            pdf = generar_pdf_general(
+                info["cuidador"], fecha_iso,
+                info["entradas"], info["mantenimiento"], info["temas"],
+                taxis_records, []
+            )
             enviar_correo(
                 f"Informe general - {fecha_mostrar}",
                 f"Adjunt informe general {fecha_mostrar}",
                 [pdf]
             )
-            st.success("✅ Informe desat a Dataverse i enviat per correu.")
-        else:
-            st.success("✅ Informe desat a Dataverse (sense enviar correu).")
 
         st.session_state["bloqueado"] = True
-        st.session_state["confirmar_salir_general"] = False
+        st.success("✅ Informe desat correctament.")
         st.rerun()
-
-    # =========================
-    # Sortida menú (original)
-    # =========================
-    if st.session_state.get("confirmar_salir_general", False):
-        st.warning("⚠ Hi ha canvis sense desar. Segur que vols tornar al menú?")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Sí, tornar al menú", key="salir_sin_guardar_general"):
-                st.session_state["confirmar_salir_general"] = False
-                st.session_state["fecha_cargada"] = None
-                st.session_state["vista_actual"] = "menu"
-                st.rerun()
-        with col2:
-            if st.button("Cancel·lar", key="cancelar_salida_general"):
-                st.session_state["confirmar_salir_general"] = False
-                st.rerun()
-    else:
-        if st.button("🏠 Tornar al menú", key="volver_inicio_general"):
-            if not st.session_state["bloqueado"]:
-                st.session_state["confirmar_salir_general"] = True
-                st.rerun()
-            else:
-                st.session_state["fecha_cargada"] = None
-                st.session_state["vista_actual"] = "menu"
-                st.rerun()
 
 # app_dataverse.py – Bloque 8
 # -----------------------
