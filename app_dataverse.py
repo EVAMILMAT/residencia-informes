@@ -838,35 +838,35 @@ def enviar_correo(asunto, cuerpo, lista_pdfs):
         st.error(f"❌ Error en enviar el correu: {e}")
         return False
         
-def enviar_correo_restaurant(asunto: str, cuerpo: str) -> bool:
-    """
-    Envia un correu (sense adjunts) al restaurant.
-    Destinataris: o bé RESTAURANT_EMAIL_TO (llista) o bé 2 camps RESTAURANT_EMAIL_TO_1 / _2.
-    """
+def enviar_correo_restaurant(asunto: str, cuerpo: str, extra_to: list[str] | None = None) -> bool:
     try:
         EMAIL_FROM = st.secrets["EMAIL_FROM"]
         EMAIL_PASSWORD = st.secrets["EMAIL_PASSWORD"]
 
-        # Opció 1: llista
         to_list = st.secrets.get("RESTAURANT_EMAIL_TO", None)
-
-        # Opció 2: dos camps
         if not to_list:
             to1 = st.secrets.get("RESTAURANT_EMAIL_TO_1", "")
             to2 = st.secrets.get("RESTAURANT_EMAIL_TO_2", "")
             to_list = [x for x in [to1, to2] if x]
 
-        if not to_list or not isinstance(to_list, (list, tuple)) or len(to_list) < 2:
-            st.error("Falten secrets del restaurant (RESTAURANT_EMAIL_TO o RESTAURANT_EMAIL_TO_1/_2).")
+        if not isinstance(to_list, (list, tuple)) or len(to_list) < 2:
+            st.error("Falten destinataris del restaurant a secrets.")
             return False
 
     except Exception:
-        st.error("Falten secrets a .streamlit/secrets.toml (EMAIL_FROM, EMAIL_PASSWORD i destinataris del restaurant).")
+        st.error("Falten secrets (EMAIL_FROM, EMAIL_PASSWORD i destinataris del restaurant).")
         return False
+
+    # Afegir destinataris extra (p.ex. CTEIB)
+    extra_to = extra_to or []
+    extra_to = [x.strip() for x in extra_to if x and str(x).strip()]
+    all_to = list(dict.fromkeys(list(to_list) + extra_to))  # sense duplicats, preserva ordre
 
     msg = MIMEMultipart()
     msg["From"] = EMAIL_FROM
     msg["To"] = ", ".join(to_list)
+    if extra_to:
+        msg["Cc"] = ", ".join(extra_to)
     msg["Subject"] = asunto
     msg.attach(MIMEText(cuerpo, "plain"))
 
@@ -874,7 +874,7 @@ def enviar_correo_restaurant(asunto: str, cuerpo: str) -> bool:
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls()
             server.login(EMAIL_FROM, EMAIL_PASSWORD)
-            server.sendmail(EMAIL_FROM, to_list, msg.as_string())
+            server.sendmail(EMAIL_FROM, all_to, msg.as_string())
         return True
     except Exception as e:
         st.error(f"❌ Error en enviar el correu al restaurant: {e}")
@@ -1153,8 +1153,9 @@ def formulario_informe_general():
             st.session_state["informe_general_id"] = None
             st.session_state["bloqueado"] = False
 
-        # ✅ IMPORTANT: sincronitzar el text_area reactiu de pícnics amb el valor carregat
+        # ✅ Sincronitzar widgets reactius de pícnics amb el valor carregat
         st.session_state["picnics_txt"] = info.get("temas", "")
+        st.session_state["picnics_cc_cteib"] = False
 
     # -----------------------
     # CONTROL BLOQUEIG
@@ -1168,48 +1169,13 @@ def formulario_informe_general():
     disabled = st.session_state["bloqueado"]
 
     # -----------------------
-    # PÍCNICS (fora del form per ser reactiu)
-    # -----------------------
-    st.text_area(
-        "Pícnics pel dia següent",
-        value=st.session_state.get("picnics_txt", info.get("temas", "")),
-        height=120,
-        disabled=disabled,
-        key="picnics_txt"
-    )
-
-    def _hash_text(s: str) -> str:
-        return hashlib.sha256((s or "").strip().encode("utf-8")).hexdigest()
-
-    picnic_key = f"picnic_sent_hash__{fecha_iso}"
-    actual_hash = _hash_text(st.session_state.get("picnics_txt", ""))
-    sent_hash = st.session_state.get(picnic_key, "")
-
-    ja_enviat_igual = bool(sent_hash) and sent_hash == actual_hash
-    cal_rectificar = bool(sent_hash) and sent_hash != actual_hash and actual_hash != ""
-
-    # Botó correu pícnics (fora del form, reactiu)
-    colp1, colp2 = st.columns([1, 3])
-    with colp1:
-        label_picnic = "✅ Correu pícnics enviat" if ja_enviat_igual else "📨 Enviar correu pícnics"
-        disabled_picnic_btn = disabled or actual_hash == "" or ja_enviat_igual
-        enviar_picnic_btn = st.button(label_picnic, disabled=disabled_picnic_btn, use_container_width=True)
-
-    with colp2:
-        if cal_rectificar:
-            st.caption("⚠️ Has canviat el text. Cal reenviar i l’assumpte acabarà amb **RECTIFICAT**.")
-        elif ja_enviat_igual:
-            st.caption("Ja s'ha enviat al restaurant amb aquest contingut.")
-        else:
-            st.caption("Envia aquest text al restaurant (2 destinataris des de secrets).")
-
-    # -----------------------
-    # FORMULARI (sense pícnics a dins)
+    # FORMULARI (sense pícnics dins, per ser reactiu)
     # -----------------------
     submitted_enviar = False
     submitted_sense_enviar = False
 
     with st.form("form_informe_general", clear_on_submit=False):
+
         cuidador_txt = st.text_input(
             "Cuidador/a",
             value=info.get("cuidador", ""),
@@ -1229,6 +1195,8 @@ def formulario_informe_general():
             height=120,
             disabled=disabled
         )
+
+        # (NO PÍCNICS AQUÍ)
 
         # -------- TAXIS (original) --------
         with st.expander("🚕 Detalls dels taxis", expanded=True):
@@ -1250,7 +1218,58 @@ def formulario_informe_general():
             submitted_sense_enviar = st.form_submit_button("💾 Desar sense enviar", disabled=disabled)
 
     # -----------------------
-    # ENVIAR CORREU PÍCNICS (reactiu, NO depèn de guardar)
+    # PÍCNICS (fora del form, però al mateix lloc visual: després de manteniment i abans de taxis)
+    # -----------------------
+    # IMPORTANT: si vols exactament la posició "entre manteniment i taxis",
+    # posa aquest bloc just abans del expander de taxis; aquí queda just després del form.
+    # Si vols exacta posició, mou aquest bloc cap amunt (abans del expander) mantenint-lo fora del form.
+
+    if "picnics_txt" not in st.session_state:
+        st.session_state["picnics_txt"] = info.get("temas", "")
+    if "picnics_cc_cteib" not in st.session_state:
+        st.session_state["picnics_cc_cteib"] = False
+
+    st.text_area(
+        "Pícnics pel dia següent",
+        height=120,
+        disabled=disabled,
+        key="picnics_txt"
+    )
+
+    st.checkbox(
+        "Enviar còpia a IES CTEIB",
+        disabled=disabled,
+        key="picnics_cc_cteib"
+    )
+
+    def _hash_text(s: str) -> str:
+        return hashlib.sha256((s or "").strip().encode("utf-8")).hexdigest()
+
+    picnic_key = f"picnic_sent_hash__{fecha_iso}"
+
+    hash_input = f"{st.session_state.get('picnics_txt','').strip()}||CC_CTEIB={bool(st.session_state.get('picnics_cc_cteib', False))}"
+    actual_hash = _hash_text(hash_input)
+    sent_hash = st.session_state.get(picnic_key, "")
+
+    ja_enviat_igual = bool(sent_hash) and sent_hash == actual_hash
+    cal_rectificar = bool(sent_hash) and sent_hash != actual_hash and st.session_state.get("picnics_txt", "").strip() != ""
+
+    colp1, colp2 = st.columns([1, 3])
+    with colp1:
+        label_picnic = "✅ Correu pícnics enviat" if ja_enviat_igual else "📨 Enviar correu pícnics"
+        disabled_picnic_btn = disabled or (st.session_state.get("picnics_txt", "").strip() == "") or ja_enviat_igual
+        enviar_picnic_btn = st.button(label_picnic, disabled=disabled_picnic_btn, use_container_width=True)
+
+    with colp2:
+        if cal_rectificar:
+            st.caption("⚠️ Has fet canvis (text i/o còpia). Cal reenviar i l’assumpte acabarà amb **RECTIFICAT**.")
+        elif ja_enviat_igual:
+            st.caption("Ja s'ha enviat amb aquest contingut i aquesta configuració de còpia.")
+        else:
+            st.caption("Envia aquest text al restaurant (i opcionalment a IES CTEIB).")
+
+    # -----------------------
+    # ENVIAR CORREU PÍCNICS
     # -----------------------
     if enviar_picnic_btn and not ja_enviat_igual and not disabled:
         dies = ["dilluns", "dimarts", "dimecres", "dijous", "divendres", "dissabte", "diumenge"]
@@ -1258,7 +1277,10 @@ def formulario_informe_general():
                  "agost", "setembre", "octubre", "novembre", "desembre"]
 
         data_picnic = fecha_sel + timedelta(days=1)
-        asunto_base = f"Picnics per demà {dies[data_picnic.weekday()]} {data_picnic.day} de {mesos[data_picnic.month-1]}"
+        asunto_base = (
+            f"Picnics per demà {dies[data_picnic.weekday()]} "
+            f"{data_picnic.day} de {mesos[data_picnic.month-1]}"
+        )
         asunto = f"{asunto_base} - RECTIFICAT" if cal_rectificar else asunto_base
 
         cuerpo = (
@@ -1269,7 +1291,15 @@ def formulario_informe_general():
             "Residència Reina Sofia\n"
         )
 
-        ok = enviar_correo_restaurant(asunto, cuerpo)
+        extra = []
+        if st.session_state.get("picnics_cc_cteib", False):
+            cteib = str(st.secrets.get("IES_CTEIB_EMAIL", "")).strip()
+            if not cteib:
+                st.error("Falta IES_CTEIB_EMAIL a secrets.toml")
+                return
+            extra.append(cteib)
+
+        ok = enviar_correo_restaurant(asunto, cuerpo, extra_to=extra)
         if ok:
             st.session_state[picnic_key] = actual_hash
             st.success("✅ Correu de pícnics enviat.")
@@ -1283,7 +1313,7 @@ def formulario_informe_general():
         info["entradas"] = entradas_txt
         info["mantenimiento"] = mantenimiento_txt
 
-        # ✅ Important: pícnics ve del text_area reactiu
+        # ✅ Important: pícnics ve del widget reactiu
         info["temas"] = st.session_state.get("picnics_txt", "")
 
         taxis_records = st.session_state["taxis_df"].to_dict("records")
