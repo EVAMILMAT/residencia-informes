@@ -1323,7 +1323,7 @@ def formulario_informe_general():
             else:
                 st.caption("Per ara no hi ha informes individuals registrats per aquesta data.")
 
-    col_guardar_1, col_guardar_2 = st.columns(2)
+        col_guardar_1, col_guardar_2 = st.columns(2)
         with col_guardar_1:
             submitted_enviar = st.form_submit_button("💾 Desar i enviar", disabled=disabled)
         with col_guardar_2:
