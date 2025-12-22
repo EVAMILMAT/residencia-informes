@@ -1346,6 +1346,39 @@ def formulario_informe_general():
         st.session_state["bloqueado"] = True
         st.success("✅ Informe desat correctament.")
         st.rerun()
+    # -----------------------
+    # TORNAR AL MENÚ PRINCIPAL (recuperat)
+    # -----------------------
+    if "confirmar_salir_general" not in st.session_state:
+        st.session_state["confirmar_salir_general"] = False
+
+    # Si hi ha canvis sense desar (en edició), demanam confirmació
+    if st.session_state.get("confirmar_salir_general", False):
+        st.warning("⚠ Hi ha canvis sense desar. Segur que vols tornar al menú?")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Sí, tornar al menú", key="salir_sin_guardar_general"):
+                st.session_state["confirmar_salir_general"] = False
+                st.session_state["fecha_cargada"] = None
+                st.session_state["vista_actual"] = "menu"
+                st.rerun()
+        with col2:
+            if st.button("Cancel·lar", key="cancelar_salida_general"):
+                st.session_state["confirmar_salir_general"] = False
+                st.rerun()
+    else:
+        if st.button("🏠 Tornar al menú", key="volver_inicio_general"):
+            # Si està desbloquejat (editant), avisam. Si està bloquejat, tornam directe.
+            if not st.session_state.get("bloqueado", False):
+                st.session_state["confirmar_salir_general"] = True
+                st.rerun()
+            else:
+                st.session_state["fecha_cargada"] = None
+                st.session_state["vista_actual"] = "menu"
+                st.rerun()
+
+
+
 
 # app_dataverse.py – Bloque 8
 # -----------------------
