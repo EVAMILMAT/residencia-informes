@@ -1153,6 +1153,9 @@ def formulario_informe_general():
             st.session_state["informe_general_id"] = None
             st.session_state["bloqueado"] = False
 
+        # ✅ IMPORTANT: sincronitzar el text_area reactiu de pícnics amb el valor carregat
+        st.session_state["picnics_txt"] = info.get("temas", "")
+
     # -----------------------
     # CONTROL BLOQUEIG
     # -----------------------
@@ -1165,14 +1168,48 @@ def formulario_informe_general():
     disabled = st.session_state["bloqueado"]
 
     # -----------------------
-    # FORMULARI
+    # PÍCNICS (fora del form per ser reactiu)
+    # -----------------------
+    st.text_area(
+        "Pícnics pel dia següent",
+        value=st.session_state.get("picnics_txt", info.get("temas", "")),
+        height=120,
+        disabled=disabled,
+        key="picnics_txt"
+    )
+
+    def _hash_text(s: str) -> str:
+        return hashlib.sha256((s or "").strip().encode("utf-8")).hexdigest()
+
+    picnic_key = f"picnic_sent_hash__{fecha_iso}"
+    actual_hash = _hash_text(st.session_state.get("picnics_txt", ""))
+    sent_hash = st.session_state.get(picnic_key, "")
+
+    ja_enviat_igual = bool(sent_hash) and sent_hash == actual_hash
+    cal_rectificar = bool(sent_hash) and sent_hash != actual_hash and actual_hash != ""
+
+    # Botó correu pícnics (fora del form, reactiu)
+    colp1, colp2 = st.columns([1, 3])
+    with colp1:
+        label_picnic = "✅ Correu pícnics enviat" if ja_enviat_igual else "📨 Enviar correu pícnics"
+        disabled_picnic_btn = disabled or actual_hash == "" or ja_enviat_igual
+        enviar_picnic_btn = st.button(label_picnic, disabled=disabled_picnic_btn, use_container_width=True)
+
+    with colp2:
+        if cal_rectificar:
+            st.caption("⚠️ Has canviat el text. Cal reenviar i l’assumpte acabarà amb **RECTIFICAT**.")
+        elif ja_enviat_igual:
+            st.caption("Ja s'ha enviat al restaurant amb aquest contingut.")
+        else:
+            st.caption("Envia aquest text al restaurant (2 destinataris des de secrets).")
+
+    # -----------------------
+    # FORMULARI (sense pícnics a dins)
     # -----------------------
     submitted_enviar = False
     submitted_sense_enviar = False
-    submitted_picnic = False
 
     with st.form("form_informe_general", clear_on_submit=False):
-
         cuidador_txt = st.text_input(
             "Cuidador/a",
             value=info.get("cuidador", ""),
@@ -1193,25 +1230,6 @@ def formulario_informe_general():
             disabled=disabled
         )
 
-        temas_txt = st.text_area(
-            "Pícnics pel dia següent",
-            value=info.get("temas", ""),
-            height=120,
-            disabled=disabled,
-            key="picnics_txt"
-        )
-
-        # -------- Estat enviament pícnics --------
-        def _hash_text(s: str) -> str:
-            return hashlib.sha256((s or "").strip().encode("utf-8")).hexdigest()
-
-        picnic_key = f"picnic_sent_hash__{fecha_iso}"
-        actual_hash = _hash_text(st.session_state.get("picnics_txt", ""))
-        sent_hash = st.session_state.get(picnic_key, "")
-
-        ja_enviat_igual = bool(sent_hash) and sent_hash == actual_hash
-        cal_rectificar = bool(sent_hash) and sent_hash != actual_hash and actual_hash != ""
-
         # -------- TAXIS (original) --------
         with st.expander("🚕 Detalls dels taxis", expanded=True):
             taxis_df = st.data_editor(
@@ -1224,25 +1242,17 @@ def formulario_informe_general():
             )
             st.session_state["taxis_df"] = _ensure_taxis_df_schema(taxis_df)
 
-        # -------- BOTONS --------
-        c1, c2, c3 = st.columns(3)
-
+        # -------- BOTONS DESAR --------
+        c1, c2 = st.columns(2)
         with c1:
             submitted_enviar = st.form_submit_button("💾 Desar i enviar", disabled=disabled)
         with c2:
             submitted_sense_enviar = st.form_submit_button("💾 Desar sense enviar", disabled=disabled)
-        with c3:
-            label = "✅ Correu pícnics enviat" if ja_enviat_igual else "📨 Enviar correu pícnics"
-            disabled_picnic = disabled or actual_hash == "" or ja_enviat_igual
-            submitted_picnic = st.form_submit_button(label, disabled=disabled_picnic)
-
-        if cal_rectificar:
-            st.caption("⚠️ El text ha canviat. Si envies de nou, l’assumpte acabarà amb **RECTIFICAT**.")
 
     # -----------------------
-    # ENVIAR CORREU PÍCNICS
+    # ENVIAR CORREU PÍCNICS (reactiu, NO depèn de guardar)
     # -----------------------
-    if submitted_picnic and not ja_enviat_igual and not disabled:
+    if enviar_picnic_btn and not ja_enviat_igual and not disabled:
         dies = ["dilluns", "dimarts", "dimecres", "dijous", "divendres", "dissabte", "diumenge"]
         mesos = ["gener", "febrer", "març", "abril", "maig", "juny", "juliol",
                  "agost", "setembre", "octubre", "novembre", "desembre"]
@@ -1272,6 +1282,8 @@ def formulario_informe_general():
         info["cuidador"] = cuidador_txt
         info["entradas"] = entradas_txt
         info["mantenimiento"] = mantenimiento_txt
+
+        # ✅ Important: pícnics ve del text_area reactiu
         info["temas"] = st.session_state.get("picnics_txt", "")
 
         taxis_records = st.session_state["taxis_df"].to_dict("records")
