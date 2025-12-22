@@ -1170,69 +1170,145 @@ def formulario_informe_general():
             disabled=disabled
         )
 
-        with st.expander("🚕 Detalls dels taxis", expanded=True):
-            st.session_state["taxis_df"] = _ensure_taxis_df_schema(st.session_state.get("taxis_df"))
-            taxis_df = st.data_editor(
-                st.session_state["taxis_df"],
-                num_rows="dynamic",
-                hide_index=True,
-                use_container_width=True,
-                disabled=disabled,
-                key="taxis_editor",
-                column_config={
-                    "Fecha": st.column_config.TextColumn("Data (dd/mm/aaaa)"),
-                    "Hora": st.column_config.TextColumn("Hora (hh:mm)"),
-                    "Recogida": st.column_config.TextColumn("Recollida"),
-                    "Destino": st.column_config.TextColumn("Destí"),
-                    "Deportistas": st.column_config.TextColumn("Esportistes"),
-                    "Observaciones": st.column_config.TextColumn("Observacions"),
-                }
+       with st.expander("🚕 Detalls dels taxis", expanded=True):
+    st.session_state["taxis_df"] = _ensure_taxis_df_schema(st.session_state.get("taxis_df"))
+
+    # ==============================
+    # ✅ Afegir taxi amb desplegable + text lliure
+    # ==============================
+    # Canvia aquestes 2 opcions pels teus valors reals
+    OPCIONS_RECOLLIDA = ["CALANOVA", "CTEIB"]
+    OPCIONS_DESTI = ["CALANOVA", "CTEIB"]
+
+    with st.container(border=True):
+        st.markdown("**➕ Afegir servei de taxi**")
+
+        c1, c2, c3 = st.columns([1, 1, 2])
+
+        with c1:
+            data_srv = st.text_input("Data servei (dd/mm/aaaa)", value="", key="taxi_add_fecha", disabled=disabled)
+            hora_srv = st.text_input("Hora (hh:mm)", value="", key="taxi_add_hora", disabled=disabled)
+
+        with c2:
+            rec_sel = st.selectbox(
+                "Recollida",
+                options=[""] + OPCIONS_RECOLLIDA + ["Altres…"],
+                index=0,
+                key="taxi_add_rec_sel",
+                disabled=disabled
             )
+            rec_alt = ""
+            if rec_sel == "Altres…":
+                rec_alt = st.text_input("Recollida (altres)", value="", key="taxi_add_rec_alt", disabled=disabled)
 
-            def normalizar_fecha(v):
-                v = "" if v is None else str(v)
-                v = v.replace("-", "/").replace(".", "/").strip()
-                if not v:
-                    return ""
-                p = v.split("/")
-                if len(p) == 3:
-                    d, m, a = p
-                    if len(a) == 2:
-                        a = "20" + a
-                    try:
-                        return datetime.strptime(f"{d}/{m}/{a}", "%d/%m/%Y").strftime("%d/%m/%Y")
-                    except Exception:
-                        return v
-                return v
+            des_sel = st.selectbox(
+                "Destí",
+                options=[""] + OPCIONS_DESTI + ["Altres…"],
+                index=0,
+                key="taxi_add_des_sel",
+                disabled=disabled
+            )
+            des_alt = ""
+            if des_sel == "Altres…":
+                des_alt = st.text_input("Destí (altres)", value="", key="taxi_add_des_alt", disabled=disabled)
 
-            def normalizar_hora(v):
-                v = "" if v is None else str(v)
-                v = v.strip().replace(".", ":").replace("h", ":").replace("H", ":")
-                if not v:
-                    return ""
-                if v.isdigit():
-                    if len(v) == 1:
-                        return f"0{v}:00"
-                    if len(v) == 2:
-                        return f"{v}:00"
-                    if len(v) == 3:
-                        return f"{v[0]}:{v[1:]}"
-                    if len(v) == 4:
-                        return f"{v[:2]}:{v[2:]}"
+        with c3:
+            deps = st.text_area("Esportistes (1 per línia)", value="", height=80, key="taxi_add_deps", disabled=disabled)
+            obs = st.text_area("Observacions", value="", height=80, key="taxi_add_obs", disabled=disabled)
+
+        # Reutilitzam les teves funcions de normalització
+        def normalizar_fecha(v):
+            v = "" if v is None else str(v)
+            v = v.replace("-", "/").replace(".", "/").strip()
+            if not v:
+                return ""
+            p = v.split("/")
+            if len(p) == 3:
+                d, m, a = p
+                if len(a) == 2:
+                    a = "20" + a
+                try:
+                    return datetime.strptime(f"{d}/{m}/{a}", "%d/%m/%Y").strftime("%d/%m/%Y")
+                except Exception:
                     return v
-                for fmt in ["%H:%M", "%H:%M:%S", "%H:%M:%S.%f"]:
-                    try:
-                        return datetime.strptime(v, fmt).strftime("%H:%M")
-                    except Exception:
-                        pass
+            return v
+
+        def normalizar_hora(v):
+            v = "" if v is None else str(v)
+            v = v.strip().replace(".", ":").replace("h", ":").replace("H", ":")
+            if not v:
+                return ""
+            if v.isdigit():
+                if len(v) == 1:
+                    return f"0{v}:00"
+                if len(v) == 2:
+                    return f"{v}:00"
+                if len(v) == 3:
+                    return f"{v[0]}:{v[1:]}"
+                if len(v) == 4:
+                    return f"{v[:2]}:{v[2:]}"
                 return v
+            for fmt in ["%H:%M", "%H:%M:%S", "%H:%M:%S.%f"]:
+                try:
+                    return datetime.strptime(v, fmt).strftime("%H:%M")
+                except Exception:
+                    pass
+            return v
 
-            if "Fecha" in taxis_df.columns:
-                taxis_df["Fecha"] = taxis_df["Fecha"].apply(normalizar_fecha)
-            if "Hora" in taxis_df.columns:
-                taxis_df["Hora"] = taxis_df["Hora"].apply(normalizar_hora)
+        if st.button("Afegir a la llista", key="taxi_add_btn", disabled=disabled, use_container_width=True):
+            rec_final = rec_alt.strip() if rec_sel == "Altres…" else (rec_sel or "").strip()
+            des_final = des_alt.strip() if des_sel == "Altres…" else (des_sel or "").strip()
 
-            st.session_state["taxis_df"] = _ensure_taxis_df_schema(taxis_df)
+            nova_fila = {
+                "Fecha": normalizar_fecha(data_srv),
+                "Hora": normalizar_hora(hora_srv),
+                "Recogida": rec_final,
+                "Destino": des_final,
+                "Deportistas": (deps or "").strip(),
+                "Observaciones": (obs or "").strip(),
+            }
+
+            df = _ensure_taxis_df_schema(st.session_state["taxis_df"])
+            df = pd.concat([df, pd.DataFrame([nova_fila])], ignore_index=True)
+            st.session_state["taxis_df"] = _ensure_taxis_df_schema(df)
+
+            # netejar inputs
+            for k in ["taxi_add_fecha", "taxi_add_hora", "taxi_add_rec_sel", "taxi_add_rec_alt",
+                      "taxi_add_des_sel", "taxi_add_des_alt", "taxi_add_deps", "taxi_add_obs"]:
+                st.session_state[k] = "" if k not in ["taxi_add_rec_sel", "taxi_add_des_sel"] else ""
+
+            st.rerun()
+
+    st.divider()
+
+    # ==============================
+    # Taula editable (com ja la tens)
+    # ==============================
+    taxis_df = st.data_editor(
+        st.session_state["taxis_df"],
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        disabled=disabled,
+        key="taxis_editor",
+        column_config={
+            "Fecha": st.column_config.TextColumn("Data (dd/mm/aaaa)"),
+            "Hora": st.column_config.TextColumn("Hora (hh:mm)"),
+            "Recogida": st.column_config.TextColumn("Recollida"),
+            "Destino": st.column_config.TextColumn("Destí"),
+            "Deportistas": st.column_config.TextColumn("Esportistes"),
+            "Observaciones": st.column_config.TextColumn("Observacions"),
+        }
+    )
+
+    # normalització com ja feies
+    if "Fecha" in taxis_df.columns:
+        taxis_df["Fecha"] = taxis_df["Fecha"].apply(normalizar_fecha)
+    if "Hora" in taxis_df.columns:
+        taxis_df["Hora"] = taxis_df["Hora"].apply(normalizar_hora)
+
+    st.session_state["taxis_df"] = _ensure_taxis_df_schema(taxis_df)
+
 
         with st.expander("📑 Informes individuals d'aquest dia", expanded=False):
             try:
