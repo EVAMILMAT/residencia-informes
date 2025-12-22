@@ -1309,8 +1309,7 @@ def formulario_informe_general():
 
     st.session_state["taxis_df"] = _ensure_taxis_df_schema(taxis_df)
 
-
-        with st.expander("📑 Informes individuals d'aquest dia", expanded=False):
+    with st.expander("📑 Informes individuals d'aquest dia", expanded=False):
             try:
                 alumnos_ind_dia = DV.get_alumnos_con_informe_en_fecha(fecha_iso)
             except Exception as e:
