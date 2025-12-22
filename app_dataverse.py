@@ -1170,7 +1170,7 @@ def formulario_informe_general():
             disabled=disabled
         )
 
-        with st.expander("🚕 Detalls dels taxis", expanded=True):
+     with st.expander("🚕 Detalls dels taxis", expanded=True):
         st.session_state["taxis_df"] = _ensure_taxis_df_schema(st.session_state.get("taxis_df"))
 
     # ==============================
