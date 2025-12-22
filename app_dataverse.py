@@ -1123,7 +1123,7 @@ def formulario_informe_general():
         st.session_state["fecha_cargada"] = fecha_iso
 
         try:
-            informe = DV.get_informe_general_por_fecha(fecha_iso)
+            informe = DV.get_informe_general(fecha_iso)
         except Exception as e:
             st.error(f"Error llegint informe general des de Dataverse: {e}")
             informe = None
