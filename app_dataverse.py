@@ -1188,12 +1188,16 @@ def formulario_informe_general():
             st.session_state["taxis_df"] = _ensure_taxis_df_schema(pd.DataFrame(taxis))
             st.session_state["bloqueado"] = True
         else:
+            # ✅ Informe nou: cuidador automàtic segons usuari loguejat
+            info["cuidador"] = obtener_cuidador_para_usuario_session()
+
             info["entradas"] = ""
             info["mantenimiento"] = ""
             info["temas"] = ""
             st.session_state["taxis_df"] = _ensure_taxis_df_schema(pd.DataFrame([]))
             st.session_state["informe_general_id"] = None
             st.session_state["bloqueado"] = False
+
 
         # ✅ Sincronitzar widgets reactius de pícnics amb el valor carregat
         st.session_state["picnics_txt"] = info.get("temas", "")
@@ -1351,7 +1355,7 @@ def formulario_informe_general():
     # DESAR INFORME
     # -----------------------
     if submitted_enviar or submitted_sense_enviar:
-        info["cuidador"] = cuidador_txt
+        info["cuidador"] = info.get("cuidador") or obtener_cuidador_para_usuario_session()
         info["entradas"] = entradas_txt
         info["mantenimiento"] = mantenimiento_txt
 
