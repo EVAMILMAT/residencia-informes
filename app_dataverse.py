@@ -1088,6 +1088,48 @@ def formulario_informe_general():
     st.header("🗓️ Introduir informe general")
 
     # -----------------------
+    # BOTÓ + TAULA D'ÀLIES (recuperat)
+    # -----------------------
+    global ALUMNOS, ALIAS_DEPORTISTAS
+
+    # Carregar àlies si no estan carregats
+    if not ALUMNOS or not ALIAS_DEPORTISTAS:
+        try:
+            cargar_alumnos_desde_dataverse()
+        except Exception:
+            pass
+
+    if "mostrar_aliases_general" not in st.session_state:
+        st.session_state["mostrar_aliases_general"] = False
+    if "filtre_aliases_general" not in st.session_state:
+        st.session_state["filtre_aliases_general"] = ""
+
+    cA, cB, cC = st.columns([1, 2, 3])
+    with cA:
+        if st.button("🏷️ Veure àlies", key="btn_aliases_general", use_container_width=True):
+            st.session_state["mostrar_aliases_general"] = not st.session_state["mostrar_aliases_general"]
+    with cB:
+        st.text_input("Cercar", key="filtre_aliases_general", placeholder="Nom o @àlies…")
+    with cC:
+        st.caption("Llista d’@àlies per escriure més ràpid als camps del formulari.")
+
+    if st.session_state["mostrar_aliases_general"]:
+        f = (st.session_state.get("filtre_aliases_general") or "").strip().lower()
+
+        data_aliases = []
+        for nom in (ALUMNOS or []):
+            alias = (ALIAS_DEPORTISTAS.get(nom) or generar_alias(nom) or "").strip()
+            if not f or f in nom.lower() or f in alias.lower():
+                data_aliases.append({"Esportista": nom, "Àlies": alias})
+
+        if data_aliases:
+            df_aliases = pd.DataFrame(data_aliases)
+            st.dataframe(df_aliases, use_container_width=True, hide_index=True)
+        else:
+            st.info("No hi ha coincidències amb el filtre.")
+
+    
+    # -----------------------
     # ESTAT INICIAL
     # -----------------------
     if "fecha_cargada" not in st.session_state:
